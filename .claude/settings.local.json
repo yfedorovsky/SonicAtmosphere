@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest sonic-atmosphere --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --no-turbopack)",
+      "Bash(yes \"\")",
+      "Bash(npm install zustand @hello-pangea/dnd clsx tailwind-merge)",
+      "Bash(npx shadcn@latest init -d)",
+      "Bash(npx shadcn@latest add dialog slider toast sonner dropdown-menu -y)",
+      "Bash(npx next build)",
+      "Bash(npm install)",
+      "Bash(git init)",
+      "Bash(git add -A)"
+    ]
+  }
+}
