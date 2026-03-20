@@ -15,46 +15,51 @@ export function BottomBar({ showExport = false, onExport }: BottomBarProps) {
   const count = trackCount();
 
   return (
-    <footer className="fixed bottom-0 right-0 w-full md:w-[calc(100%-16rem)] h-24 z-50 bg-[#131315]/80 backdrop-blur-3xl flex items-center justify-between px-6 md:px-12 font-headline font-semibold shadow-[0_-10px_40px_rgba(0,0,0,0.6)]">
+    <footer className="fixed bottom-0 right-0 w-full md:w-[calc(100%-16rem)] h-20 z-50 bg-[#131315]/80 backdrop-blur-3xl border-t border-white/5 flex items-center justify-between px-6 md:px-12 font-headline font-semibold">
       {/* Draft info */}
-      <div className="flex items-center gap-4 min-w-[200px]">
+      <div className="flex items-center gap-4 min-w-[180px]">
         {count > 0 ? (
           <>
-            <div className="w-12 h-12 rounded-lg bg-surface-container-high flex items-center justify-center">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
               <Icon name="queue_music" className="text-primary" />
             </div>
             <div className="flex flex-col">
-              <span className="text-on-surface text-sm">{count} Tracks</span>
-              <span className="text-xs text-primary">
-                Total Duration: {totalDuration()}
+              <span className="text-on-surface text-sm font-bold">{count} Tracks</span>
+              <span className="text-xs text-primary tabular-nums">
+                {totalDuration()}
               </span>
             </div>
           </>
         ) : (
-          <div className="flex flex-col">
-            <span className="text-on-surface-variant text-sm">No tracks yet</span>
-            <span className="text-xs text-on-surface-variant/60">Start generating</span>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center">
+              <Icon name="queue_music" className="text-on-surface-variant/40" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-on-surface-variant/60 text-sm">No tracks yet</span>
+              <span className="text-xs text-on-surface-variant/30">Start generating</span>
+            </div>
           </div>
         )}
       </div>
 
       {/* Center nav */}
-      <div className="hidden md:flex items-center gap-8">
+      <div className="hidden md:flex items-center gap-6">
         <button
           type="button"
           onClick={() => router.push("/generator")}
-          className="flex flex-col items-center gap-1 text-on-surface-variant opacity-60 hover:opacity-100 transition-all hover:scale-105"
+          className="flex items-center gap-2 px-4 py-2 rounded-full text-on-surface-variant/60 hover:text-white hover:bg-white/5 transition-all duration-200"
         >
-          <Icon name="auto_awesome" />
-          <span className="text-[10px] uppercase tracking-widest">Generate</span>
+          <Icon name="auto_awesome" size="sm" />
+          <span className="text-xs uppercase tracking-widest font-bold">Generate</span>
         </button>
         <button
           type="button"
           onClick={() => router.push("/library")}
-          className="flex flex-col items-center gap-1 text-on-surface-variant opacity-60 hover:opacity-100 transition-all hover:scale-105"
+          className="flex items-center gap-2 px-4 py-2 rounded-full text-on-surface-variant/60 hover:text-white hover:bg-white/5 transition-all duration-200"
         >
-          <Icon name="library_music" />
-          <span className="text-[10px] uppercase tracking-widest">Library</span>
+          <Icon name="library_music" size="sm" />
+          <span className="text-xs uppercase tracking-widest font-bold">Library</span>
         </button>
       </div>
 
@@ -77,7 +82,7 @@ export function BottomBar({ showExport = false, onExport }: BottomBarProps) {
               const draft = usePlaylistStore.getState().currentDraft;
               router.push(`/builder/${draft.id}`);
             }}
-            className="flex items-center gap-2 px-6 py-2 bg-primary/10 text-primary border border-primary/20 rounded-full text-sm font-bold hover:bg-primary/20 transition-all"
+            className="flex items-center gap-2 px-6 py-2.5 bg-primary/10 text-primary border border-primary/20 rounded-full text-sm font-bold hover:bg-primary/20 transition-all duration-200"
           >
             <span>View Playlist</span>
             <Icon name="arrow_forward" size="sm" />

@@ -84,12 +84,15 @@ function GeneratorContent() {
   return (
     <AppShell>
       <div className="max-w-7xl mx-auto py-8">
-        <h2 className="font-headline text-4xl font-extrabold tracking-tighter mb-8 leading-none">
-          Curate Your Soundscape
-        </h2>
+        <div className="animate-fade-up mb-8">
+          <h2 className="font-headline text-4xl font-extrabold tracking-tighter leading-none">
+            Curate Your Soundscape
+          </h2>
+          <p className="text-on-surface-variant/50 mt-2 text-sm">Discover tracks that match your mood</p>
+        </div>
 
         {/* Mode selector + Prompt input */}
-        <section className="mb-12">
+        <section className="mb-10 animate-fade-up stagger-2">
           <div className="mb-6">
             <ModeSelector mode={mode} onChange={handleModeChange} />
           </div>

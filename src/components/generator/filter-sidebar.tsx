@@ -18,9 +18,10 @@ export function FilterSidebar({ filters, onChange }: FilterSidebarProps) {
   }
 
   return (
-    <aside className="w-72 sticky top-28 space-y-10">
+    <aside className="w-72 sticky top-24 space-y-10">
       <div>
-        <h3 className="font-headline text-xs font-bold tracking-[0.15em] uppercase text-on-surface-variant mb-6">
+        <h3 className="font-headline text-xs font-bold tracking-[0.15em] uppercase text-on-surface-variant mb-6 flex items-center gap-2">
+          <span className="w-1 h-4 rounded-full bg-primary" />
           Atmospheric Filters
         </h3>
         <div className="space-y-8">
@@ -46,7 +47,8 @@ export function FilterSidebar({ filters, onChange }: FilterSidebarProps) {
       </div>
 
       <div>
-        <h3 className="font-headline text-xs font-bold tracking-[0.15em] uppercase text-on-surface-variant mb-6">
+        <h3 className="font-headline text-xs font-bold tracking-[0.15em] uppercase text-on-surface-variant mb-6 flex items-center gap-2">
+          <span className="w-1 h-4 rounded-full bg-secondary" />
           Mood Palettes
         </h3>
         <div className="flex flex-wrap gap-2">

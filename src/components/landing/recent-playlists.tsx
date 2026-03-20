@@ -25,7 +25,7 @@ export function RecentPlaylists() {
     : PLACEHOLDER_PLAYLISTS.map((p, i) => ({ id: String(i), ...p }));
 
   return (
-    <section className="mt-32 max-w-6xl mx-auto">
+    <section className="mt-32 max-w-6xl mx-auto mb-16">
       <div className="flex items-end justify-between mb-12">
         <div>
           <h2 className="font-headline text-3xl font-bold">Jump Back In</h2>
@@ -34,17 +34,17 @@ export function RecentPlaylists() {
         <button
           type="button"
           onClick={() => router.push("/library")}
-          className="text-primary font-bold text-sm"
+          className="text-primary font-bold text-sm hover:text-primary-fixed transition-colors flex items-center gap-1"
         >
-          View All
+          View All <Icon name="arrow_forward" size="sm" />
         </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-10">
-        {displayItems.map((item) => (
+        {displayItems.map((item, i) => (
           <div
             key={item.id}
-            className="group cursor-pointer"
+            className={`group cursor-pointer animate-fade-up stagger-${i + 1}`}
             onClick={() => {
               if (drafts.length > 0) {
                 router.push(`/builder/${item.id}`);
@@ -53,7 +53,7 @@ export function RecentPlaylists() {
               }
             }}
           >
-            <div className="relative aspect-square rounded-2xl overflow-hidden bg-surface-container-highest mb-6">
+            <div className="relative aspect-square rounded-2xl overflow-hidden bg-surface-container-highest mb-6 shadow-lg shadow-black/30 group-hover:shadow-xl group-hover:shadow-black/40 transition-shadow duration-500">
               {"coverUrl" in item && item.coverUrl ? (
                 <img
                   src={item.coverUrl}
@@ -62,20 +62,20 @@ export function RecentPlaylists() {
                 />
               ) : (
                 <div
-                  className={`w-full h-full bg-gradient-to-br ${"color" in item ? item.color : "from-primary to-secondary"} opacity-60 group-hover:opacity-80 transition-opacity`}
+                  className={`w-full h-full bg-gradient-to-br ${"color" in item ? item.color : "from-primary to-secondary"} opacity-60 group-hover:opacity-80 transition-opacity duration-500`}
                 />
               )}
-              <div className="absolute inset-0 bg-black/20 group-hover:bg-black/0 transition-all" />
-              <div className="absolute bottom-4 right-4 translate-y-12 group-hover:translate-y-0 transition-transform duration-300">
+              <div className="absolute inset-0 bg-black/20 group-hover:bg-black/0 transition-all duration-500" />
+              <div className="absolute bottom-4 right-4 translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                 <button
                   type="button"
-                  className="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-2xl"
+                  className="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center shadow-2xl shadow-primary/30 hover:scale-110 transition-transform"
                 >
                   <Icon name="play_arrow" filled />
                 </button>
               </div>
             </div>
-            <h5 className="font-headline text-lg font-bold">{item.title}</h5>
+            <h5 className="font-headline text-lg font-bold group-hover:text-primary transition-colors duration-300">{item.title}</h5>
             <p className="text-sm text-on-surface-variant">{item.subtitle}</p>
           </div>
         ))}

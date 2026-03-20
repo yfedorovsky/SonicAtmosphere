@@ -25,8 +25,8 @@ export function Sidebar() {
     <aside className="h-screen w-64 fixed left-0 top-0 border-r border-white/5 bg-[#131315]/60 backdrop-blur-xl shadow-2xl shadow-black/50 flex flex-col py-8 px-4 z-50 font-headline tracking-tight hidden md:flex">
       {/* Logo */}
       <div className="mb-12 px-4">
-        <Link href="/">
-          <h1 className="text-2xl font-bold tracking-tighter text-primary">
+        <Link href="/" className="group">
+          <h1 className="text-2xl font-bold tracking-tighter text-primary group-hover:text-primary-fixed transition-colors duration-200">
             Sonic Atmosphere
           </h1>
           <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant/60 font-medium mt-1">
@@ -36,7 +36,7 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-2">
+      <nav className="flex-1 space-y-1">
         {navItems.map((item) => {
           const active = isActive(item.href);
           return (
@@ -44,24 +44,27 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-4 px-4 py-3 rounded-lg transition-all duration-300 active:scale-95",
+                "flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 active:scale-95",
                 active
-                  ? "text-primary font-bold border-r-2 border-primary bg-gradient-to-r from-primary/10 to-transparent"
+                  ? "text-primary font-bold bg-primary/10 shadow-sm"
                   : "text-on-surface-variant hover:text-white hover:bg-white/5"
               )}
             >
               <Icon name={item.icon} filled={active} />
               <span>{item.label}</span>
+              {active && (
+                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
+              )}
             </Link>
           );
         })}
       </nav>
 
       {/* Bottom section */}
-      <div className="mt-auto px-4">
+      <div className="mt-auto px-2">
         {isConnected ? (
-          <div className="flex items-center gap-3 p-2 rounded-2xl bg-white/5">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-secondary overflow-hidden flex items-center justify-center">
+          <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/5">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-secondary overflow-hidden flex items-center justify-center shrink-0">
               {user?.images?.[0]?.url ? (
                 <img
                   src={user.images[0].url}
@@ -76,18 +79,22 @@ export function Sidebar() {
               <span className="text-xs font-bold truncate">
                 {user?.display_name || "Connected"}
               </span>
-              <span className="text-[10px] text-on-surface-variant">Spotify Connected</span>
+              <span className="text-[10px] text-primary flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block" />
+                Spotify Connected
+              </span>
             </div>
           </div>
         ) : (
-          <Link href="/api/auth/spotify">
+          <a href="/api/auth/spotify">
             <button
               type="button"
-              className="w-full py-3 bg-primary text-on-primary font-bold rounded-full active:scale-95 transition-transform"
+              className="w-full py-3 bg-primary text-on-primary font-bold rounded-full active:scale-95 hover:shadow-lg hover:shadow-primary/20 transition-all duration-200 flex items-center justify-center gap-2"
             >
+              <Icon name="link" size="sm" />
               Connect Spotify
             </button>
-          </Link>
+          </a>
         )}
       </div>
     </aside>
