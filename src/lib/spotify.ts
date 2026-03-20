@@ -58,19 +58,33 @@ async function spotifyFetch(
 export async function searchTracks(
   query: string,
   accessToken: string,
-  limit = 20
+  limit = 10
 ): Promise<SpotifyTrack[]> {
-  const params = new URLSearchParams({
-    q: query,
-    type: "track",
-    limit: String(limit),
-  });
+  // Spotify search API max is 10 per request — paginate for more
+  const perPage = Math.min(limit, 10);
+  const pages = Math.ceil(limit / perPage);
+  const allTracks: SpotifyTrack[] = [];
 
-  const res = await spotifyFetch(`/search?${params}`, accessToken);
-  if (!res.ok) return [];
+  for (let page = 0; page < pages; page++) {
+    const params = new URLSearchParams({
+      q: query,
+      type: "track",
+      limit: String(perPage),
+      offset: String(page * perPage),
+    });
 
-  const data = await res.json();
-  return (data.tracks?.items || []).map(mapSpotifyTrack);
+    const res = await spotifyFetch(`/search?${params}`, accessToken);
+    if (!res.ok) break;
+
+    const data = await res.json();
+    const tracks = (data.tracks?.items || []).map(mapSpotifyTrack);
+    allTracks.push(...tracks);
+
+    // Stop if we got fewer than requested (no more results)
+    if (tracks.length < perPage) break;
+  }
+
+  return allTracks.slice(0, limit);
 }
 
 export async function searchArtists(
@@ -81,7 +95,7 @@ export async function searchArtists(
   const params = new URLSearchParams({
     q: query,
     type: "artist",
-    limit: String(limit),
+    limit: String(Math.min(limit, 10)),
   });
 
   const res = await spotifyFetch(`/search?${params}`, accessToken);
@@ -102,6 +116,9 @@ export interface RecommendationParams {
   target_energy?: number;
   target_acousticness?: number;
   target_popularity?: number;
+  target_danceability?: number;
+  target_valence?: number;
+  target_instrumentalness?: number;
   // Negative prompting: max/min constraints
   max_energy?: number;
   min_energy?: number;
@@ -129,6 +146,12 @@ export async function getRecommendations(
     searchParams.set("target_acousticness", String(params.target_acousticness / 100));
   if (params.target_popularity !== undefined)
     searchParams.set("target_popularity", String(params.target_popularity));
+  if (params.target_danceability !== undefined)
+    searchParams.set("target_danceability", String(params.target_danceability / 100));
+  if (params.target_valence !== undefined)
+    searchParams.set("target_valence", String(params.target_valence / 100));
+  if (params.target_instrumentalness !== undefined)
+    searchParams.set("target_instrumentalness", String(params.target_instrumentalness / 100));
 
   // Negative prompting constraints
   if (params.max_energy !== undefined)

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { ModeSelector } from "@/components/generator/mode-selector";
@@ -11,7 +11,7 @@ import { CurrentDraftPanel } from "@/components/generator/current-draft-panel";
 import { ImportModal } from "@/components/import/import-modal";
 import { useDraftsStore } from "@/stores/drafts-store";
 import type { GeneratorMode, FilterValues, SpotifyTrack } from "@/types";
-import { DEFAULT_FILTERS } from "@/types";
+import { DEFAULT_FILTERS, suggestMoodsFromPrompt } from "@/types";
 
 export default function GeneratorPage() {
   return (
@@ -32,7 +32,9 @@ function GeneratorContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [suggestedMoods, setSuggestedMoods] = useState<string[]>([]);
   const addRecentPrompt = useDraftsStore((s) => s.addRecentPrompt);
+  const isAutoSelectingRef = useRef(false);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) return;
@@ -40,16 +42,31 @@ function GeneratorContent() {
     setHasSearched(true);
     addRecentPrompt(prompt.trim());
 
+    // Generate context-aware mood suggestions from prompt
+    const suggested = suggestMoodsFromPrompt(prompt);
+    setSuggestedMoods(suggested);
+
+    // Auto-select suggested moods if user hasn't manually set any
+    let activeFilters = filters;
+    if (filters.moods.length === 0 && suggested.length > 0) {
+      activeFilters = { ...filters, moods: suggested };
+      isAutoSelectingRef.current = true;
+      setFilters(activeFilters);
+    }
+
     try {
       const params = new URLSearchParams({
         q: prompt.trim(),
         type: mode,
-        energy: String(filters.energy),
-        acousticness: String(filters.acousticness),
-        popularity: String(filters.popularity),
+        energy: String(activeFilters.energy),
+        acousticness: String(activeFilters.acousticness),
+        popularity: String(activeFilters.popularity),
+        danceability: String(activeFilters.danceability),
+        valence: String(activeFilters.valence),
+        instrumentalness: String(activeFilters.instrumentalness),
       });
-      if (filters.moods.length > 0) {
-        params.set("moods", filters.moods.join(","));
+      if (activeFilters.moods.length > 0) {
+        params.set("moods", activeFilters.moods.join(","));
       }
       const res = await fetch(`/api/spotify/search?${params}`);
       if (res.ok) {
@@ -73,6 +90,19 @@ function GeneratorContent() {
     // Only run on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-regenerate when filters change (only if we already have results)
+  useEffect(() => {
+    if (isAutoSelectingRef.current) {
+      isAutoSelectingRef.current = false;
+      return;
+    }
+    if (hasSearched && prompt.trim()) {
+      handleGenerate();
+    }
+    // Only trigger on filter changes, not on every dependency
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters]);
 
   function handleModeChange(newMode: GeneratorMode) {
     setMode(newMode);
@@ -111,7 +141,7 @@ function GeneratorContent() {
       {/* Two-column layout: filters | results */}
       <div className="flex gap-10 items-start pb-8">
         <div className="hidden lg:block shrink-0">
-          <FilterSidebar filters={filters} onChange={setFilters} />
+          <FilterSidebar filters={filters} onChange={setFilters} suggestedMoods={suggestedMoods} />
         </div>
 
         <div className="flex-1 min-w-0">

@@ -10,20 +10,20 @@ interface VibeChipProps {
 
 const colorMap = {
   primary: {
-    active: "border-primary/20 bg-primary/5 text-primary",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant",
+    active: "border-primary bg-primary/20 text-primary shadow-[0_0_12px_rgba(var(--md-primary-rgb,0,255,200),0.3)]",
+    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
   },
   secondary: {
-    active: "border-secondary/20 bg-secondary/5 text-secondary",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant",
+    active: "border-secondary bg-secondary/20 text-secondary shadow-[0_0_12px_rgba(var(--md-secondary-rgb,100,200,255),0.3)]",
+    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
   },
   tertiary: {
-    active: "border-tertiary/20 bg-tertiary/5 text-tertiary",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant",
+    active: "border-tertiary bg-tertiary/20 text-tertiary shadow-[0_0_12px_rgba(var(--md-tertiary-rgb,255,180,100),0.3)]",
+    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
   },
   neutral: {
-    active: "border-white/10 bg-white/10 text-on-surface",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant",
+    active: "border-white/40 bg-white/15 text-on-surface",
+    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
   },
 };
 
@@ -48,8 +48,14 @@ export function VibeChip({
         className
       )}
     >
-      {active && color === "primary" && (
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse mr-2" />
+      {active && (
+        <span className={cn(
+          "inline-block w-1.5 h-1.5 rounded-full mr-2",
+          color === "primary" && "bg-primary",
+          color === "secondary" && "bg-secondary",
+          color === "tertiary" && "bg-tertiary",
+          color === "neutral" && "bg-white",
+        )} />
       )}
       {label}
     </button>

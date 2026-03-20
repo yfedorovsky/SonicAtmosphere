@@ -48,6 +48,7 @@ Here is a sample of the tracks included for context: ${trackString || "no tracks
               },
             },
             required: ["titles", "description"],
+            additionalProperties: false,
           },
         },
       },

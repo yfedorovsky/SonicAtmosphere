@@ -36,6 +36,25 @@ const VIBE_TO_GENRES: Record<string, string[]> = {
   techno: ["techno", "minimal-techno", "detroit-techno"],
   cyberpunk: ["industrial", "electronic", "synth-pop"],
   neon: ["synth-pop", "electronic", "new-wave"],
+  night: ["chill", "trip-hop", "downtempo"],
+  "late night": ["chill", "trip-hop", "downtempo"],
+  study: ["study", "chill", "ambient"],
+  focus: ["study", "ambient", "chill"],
+  chill: ["chill", "trip-hop", "downtempo"],
+  relax: ["chill", "ambient", "new-age"],
+  relaxing: ["chill", "ambient", "new-age"],
+  rain: ["ambient", "chill", "post-rock"],
+  rainy: ["ambient", "chill", "post-rock"],
+  summer: ["pop", "reggaeton", "dance"],
+  drive: ["indie", "rock", "alt-rock"],
+  driving: ["indie", "rock", "alt-rock"],
+  workout: ["dance", "edm", "hip-hop"],
+  party: ["dance", "edm", "pop"],
+  romantic: ["r-n-b", "soul", "jazz"],
+  dark: ["industrial", "trip-hop", "post-punk"],
+  happy: ["pop", "indie-pop", "dance"],
+  coffee: ["jazz", "acoustic", "folk"],
+  morning: ["acoustic", "folk", "indie-pop"],
 };
 
 function extractGenresFromPrompt(prompt: string): string[] {
@@ -175,6 +194,9 @@ async function vibeRecommendations(
       target_energy: audioParams.target_energy ?? filters.energy,
       target_acousticness: audioParams.target_acousticness ?? filters.acousticness,
       target_popularity: filters.popularity,
+      target_danceability: filters.danceability,
+      target_valence: filters.valence,
+      target_instrumentalness: filters.instrumentalness,
       // Spread negative prompting constraints
       ...filterConstraints(audioParams),
       limit: 20,
@@ -232,6 +254,9 @@ async function songRecommendations(
     target_energy: filters.energy,
     target_acousticness: filters.acousticness,
     target_popularity: filters.popularity,
+    target_danceability: filters.danceability,
+    target_valence: filters.valence,
+    target_instrumentalness: filters.instrumentalness,
     ...filterConstraints(audioParams),
     limit: 20,
   });
@@ -264,6 +289,9 @@ async function artistRecommendations(
     target_energy: filters.energy,
     target_acousticness: filters.acousticness,
     target_popularity: filters.popularity,
+    target_danceability: filters.danceability,
+    target_valence: filters.valence,
+    target_instrumentalness: filters.instrumentalness,
     limit: 15,
   });
 
@@ -297,6 +325,9 @@ async function genreRecommendations(
     target_energy: filters.energy,
     target_acousticness: filters.acousticness,
     target_popularity: filters.popularity,
+    target_danceability: filters.danceability,
+    target_valence: filters.valence,
+    target_instrumentalness: filters.instrumentalness,
     limit: 20,
   });
 
