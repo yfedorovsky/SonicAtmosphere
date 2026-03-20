@@ -38,9 +38,13 @@ export default function BuilderPage() {
 
   return (
     <AppShell showExport onExport={() => setShowExport(true)}>
-      <div className="max-w-7xl mx-auto py-12">
-        <PlaylistHeader />
-        <TrackTable />
+      <div className="max-w-7xl mx-auto py-8">
+        <div className="animate-fade-up">
+          <PlaylistHeader />
+        </div>
+        <div className="animate-fade-up stagger-3">
+          <TrackTable />
+        </div>
       </div>
       <ExportModal open={showExport} onClose={() => setShowExport(false)} />
     </AppShell>

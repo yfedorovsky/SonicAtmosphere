@@ -2,6 +2,8 @@
 
 import { Icon } from "@/components/ui/icon";
 import { formatDuration } from "@/lib/track-parser";
+import { usePlaybackStore } from "@/stores/playback-store";
+import { cn } from "@/lib/utils";
 import type { SpotifyTrack } from "@/types";
 
 interface TrackRowProps {
@@ -14,20 +16,49 @@ interface TrackRowProps {
 
 export function TrackRow({ track, index, onRemove, dragHandleProps }: TrackRowProps) {
   const albumArt = track.album.images[track.album.images.length - 1]?.url;
+  const { currentTrack, isPlaying, toggle } = usePlaybackStore();
+  const isCurrentlyPlaying = currentTrack?.id === track.id && isPlaying;
+  const hasPreview = !!track.preview_url;
 
   return (
-    <div className="grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 items-center px-6 py-3 rounded-xl hover:bg-white/5 transition-all group cursor-grab active:cursor-grabbing">
-      {/* Index / drag handle */}
+    <div className={cn(
+      "grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 items-center px-6 py-3 rounded-xl transition-all duration-200 group cursor-grab active:cursor-grabbing",
+      isCurrentlyPlaying ? "bg-primary/5" : "hover:bg-white/5"
+    )}>
+      {/* Index / play / drag handle */}
       <div className="text-center" {...dragHandleProps}>
-        <span className="text-on-surface-variant group-hover:hidden">{index + 1}</span>
-        <span className="text-primary hidden group-hover:block">
-          <Icon name="drag_indicator" size="sm" />
-        </span>
+        {hasPreview ? (
+          <>
+            <span className={cn(
+              "group-hover:hidden",
+              isCurrentlyPlaying ? "hidden" : "block"
+            )}>
+              <span className="text-on-surface-variant">{index + 1}</span>
+            </span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); toggle(track); }}
+              className={cn(
+                "text-primary group-hover:block",
+                isCurrentlyPlaying ? "block" : "hidden"
+              )}
+            >
+              <Icon name={isCurrentlyPlaying ? "pause" : "play_arrow"} size="sm" filled />
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="text-on-surface-variant group-hover:hidden">{index + 1}</span>
+            <span className="text-primary hidden group-hover:block">
+              <Icon name="drag_indicator" size="sm" />
+            </span>
+          </>
+        )}
       </div>
 
       {/* Track info */}
       <div className="flex items-center gap-4 min-w-0">
-        <div className="w-10 h-10 rounded-md overflow-hidden shrink-0">
+        <div className="w-10 h-10 rounded-md overflow-hidden shrink-0 shadow-sm shadow-black/20">
           {albumArt ? (
             <img src={albumArt} alt={track.album.name} className="w-full h-full object-cover" />
           ) : (
@@ -37,7 +68,12 @@ export function TrackRow({ track, index, onRemove, dragHandleProps }: TrackRowPr
           )}
         </div>
         <div className="flex flex-col min-w-0">
-          <span className="font-bold text-on-surface truncate">{track.name}</span>
+          <span className={cn(
+            "font-bold truncate transition-colors duration-200",
+            isCurrentlyPlaying ? "text-primary" : "text-on-surface"
+          )}>
+            {track.name}
+          </span>
           <span className="text-sm text-on-surface-variant truncate">
             {track.artists.map((a) => a.name).join(", ")}
           </span>
@@ -50,7 +86,7 @@ export function TrackRow({ track, index, onRemove, dragHandleProps }: TrackRowPr
       </span>
 
       {/* Duration */}
-      <span className="text-right text-on-surface-variant text-sm font-headline hidden sm:block">
+      <span className="text-right text-on-surface-variant text-sm font-headline hidden sm:block tabular-nums">
         {formatDuration(track.duration_ms)}
       </span>
 
@@ -58,7 +94,7 @@ export function TrackRow({ track, index, onRemove, dragHandleProps }: TrackRowPr
       <button
         type="button"
         onClick={onRemove}
-        className="flex justify-center text-on-surface-variant hover:text-error transition-colors"
+        className="flex justify-center text-on-surface-variant/40 hover:text-error transition-colors duration-200"
       >
         <Icon name="close" size="sm" />
       </button>

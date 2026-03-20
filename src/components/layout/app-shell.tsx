@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar";
 import { TopNav } from "./top-nav";
 import { BottomBar } from "./bottom-bar";
 import { AuroraBackground } from "@/components/ui/aurora-background";
+import { PreviewPlayer } from "@/components/ui/preview-player";
 import { useDraftsStore } from "@/stores/drafts-store";
 import { useAuthStore } from "@/stores/auth-store";
 
@@ -59,6 +60,7 @@ export function AppShell({
       <main className="md:ml-64 pt-20 pb-28 min-h-screen px-6 md:px-10 relative">
         {children}
       </main>
+      <PreviewPlayer />
       {showBottomBar && <BottomBar showExport={showExport} onExport={onExport} />}
     </>
   );

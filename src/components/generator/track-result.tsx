@@ -3,6 +3,7 @@
 import { Icon } from "@/components/ui/icon";
 import { formatDuration } from "@/lib/track-parser";
 import { usePlaylistStore } from "@/stores/playlist-store";
+import { usePlaybackStore } from "@/stores/playback-store";
 import type { SpotifyTrack } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -13,11 +14,19 @@ interface TrackResultProps {
 
 export function TrackResult({ track, tags }: TrackResultProps) {
   const { addTrack, hasTrack } = usePlaylistStore();
+  const { currentTrack, isPlaying, toggle } = usePlaybackStore();
   const isAdded = hasTrack(track.id);
   const albumArt = track.album.images[0]?.url;
+  const isCurrentlyPlaying = currentTrack?.id === track.id && isPlaying;
+  const hasPreview = !!track.preview_url;
 
   return (
-    <div className="group flex items-center gap-6 p-4 rounded-xl bg-surface-container/30 hover:bg-surface-container/60 transition-all duration-300 border border-transparent hover:border-white/5">
+    <div className={cn(
+      "group flex items-center gap-6 p-4 rounded-xl transition-all duration-300 border border-transparent",
+      isCurrentlyPlaying
+        ? "bg-primary/5 border-primary/15"
+        : "bg-surface-container/30 hover:bg-surface-container/60 hover:border-white/5"
+    )}>
       {/* Album art */}
       <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 rounded-lg overflow-hidden shadow-md shadow-black/30">
         {albumArt ? (
@@ -31,14 +40,36 @@ export function TrackResult({ track, tags }: TrackResultProps) {
             <Icon name="music_note" className="text-on-surface-variant/40" />
           </div>
         )}
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <Icon name="play_circle" className="text-white drop-shadow-lg" size="lg" />
-        </div>
+        {hasPreview && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); toggle(track); }}
+            className={cn(
+              "absolute inset-0 flex items-center justify-center transition-opacity duration-200",
+              isCurrentlyPlaying ? "bg-black/50 opacity-100" : "bg-black/40 opacity-0 group-hover:opacity-100"
+            )}
+          >
+            <Icon
+              name={isCurrentlyPlaying ? "pause" : "play_arrow"}
+              className="text-white drop-shadow-lg"
+              size="lg"
+              filled
+            />
+          </button>
+        )}
+        {!hasPreview && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <Icon name="play_circle" className="text-white/50 drop-shadow-lg" size="lg" />
+          </div>
+        )}
       </div>
 
       {/* Track info */}
       <div className="flex-1 min-w-0">
-        <h4 className="font-headline font-bold text-base leading-tight truncate group-hover:text-primary transition-colors duration-200">
+        <h4 className={cn(
+          "font-headline font-bold text-base leading-tight truncate transition-colors duration-200",
+          isCurrentlyPlaying ? "text-primary" : "group-hover:text-primary"
+        )}>
           {track.name}
         </h4>
         <p className="text-on-surface-variant text-sm">

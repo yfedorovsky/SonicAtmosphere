@@ -21,8 +21,10 @@ export function TrackTable() {
 
   if (currentDraft.tracks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <Icon name="queue_music" className="text-on-surface-variant/20 mb-4" size="xl" />
+      <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in">
+        <div className="w-20 h-20 rounded-2xl bg-surface-container-high/30 flex items-center justify-center mb-6">
+          <Icon name="queue_music" className="text-on-surface-variant/20" size="xl" />
+        </div>
         <h3 className="font-headline text-xl font-bold text-on-surface-variant/60 mb-2">
           No Tracks Yet
         </h3>
@@ -37,11 +39,13 @@ export function TrackTable() {
   return (
     <div className="space-y-2">
       {/* Table header */}
-      <div className="grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 px-6 py-4 text-xs uppercase tracking-[0.15em] text-on-surface-variant font-bold border-b border-white/5">
+      <div className="grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 px-6 py-3 text-[11px] uppercase tracking-[0.15em] text-on-surface-variant/60 font-bold border-b border-white/5">
         <span className="text-center">#</span>
         <span>Title</span>
         <span className="hidden md:block">Album</span>
-        <span className="text-right hidden sm:block">Time</span>
+        <span className="text-right hidden sm:block">
+          <Icon name="timer" size="sm" className="inline-block -mt-0.5" />
+        </span>
         <span />
       </div>
 
@@ -52,7 +56,7 @@ export function TrackTable() {
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
-              className="space-y-1"
+              className="space-y-0.5"
             >
               {currentDraft.tracks.map((track, index) => (
                 <Draggable key={track.id} draggableId={track.id} index={index}>
@@ -78,7 +82,7 @@ export function TrackTable() {
       </DragDropContext>
 
       {/* Add track CTA */}
-      <div className="pt-6">
+      <div className="pt-4">
         <AddTrackButton />
       </div>
     </div>

@@ -58,19 +58,19 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-background/40 backdrop-blur-sm">
-      <div className="glass-modal w-full max-w-2xl rounded-2xl shadow-[0_0_64px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col relative border border-outline-variant/15">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-background/50 backdrop-blur-md animate-fade-in">
+      <div className="glass-modal w-full max-w-2xl rounded-2xl shadow-[0_0_80px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col relative border border-outline-variant/15 animate-scale-in">
         {/* Close */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-6 right-6 text-on-surface-variant hover:text-white transition-colors p-2 rounded-full hover:bg-white/5"
+          className="absolute top-5 right-5 text-on-surface-variant hover:text-white transition-colors duration-200 p-2 rounded-full hover:bg-white/5 z-10"
         >
           <Icon name="close" />
         </button>
 
         {/* Header */}
-        <div className="p-10 pb-6">
+        <div className="p-8 pb-4">
           <div className="flex items-center gap-3 mb-2">
             <Icon name="auto_awesome" filled className="text-primary" />
             <span className="text-xs uppercase tracking-[0.1em] text-primary font-semibold">
@@ -82,13 +82,15 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
           </h1>
         </div>
 
-        <div className="px-10 py-2 space-y-8 flex-grow overflow-y-auto max-h-[60vh]">
+        <div className="px-8 py-2 space-y-6 flex-grow overflow-y-auto max-h-[60vh] custom-scrollbar">
           {exportedUrl ? (
             /* Success state */
-            <div className="text-center py-8">
-              <Icon name="check_circle" filled className="text-primary text-6xl mb-4" />
+            <div className="text-center py-8 animate-scale-in">
+              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-6">
+                <Icon name="check_circle" filled className="text-primary text-5xl" />
+              </div>
               <h2 className="font-headline text-2xl font-bold mb-2">Playlist Created!</h2>
-              <p className="text-on-surface-variant mb-6">
+              <p className="text-on-surface-variant mb-8">
                 Your playlist has been exported to Spotify.
               </p>
               <a
@@ -106,21 +108,23 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
               {/* Playlist preview */}
               <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
                 <div className="md:col-span-2 relative group">
-                  <div className="aspect-square rounded-2xl overflow-hidden shadow-2xl">
+                  <div className="aspect-square rounded-2xl overflow-hidden shadow-2xl shadow-black/40">
                     {coverUrl ? (
                       <img
                         src={coverUrl}
                         alt="Playlist Art"
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                        className="w-full h-full object-cover"
                       />
                     ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-primary/20 to-secondary/20" />
+                      <div className="w-full h-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
+                        <Icon name="library_music" className="text-on-surface-variant/20" size="xl" />
+                      </div>
                     )}
                   </div>
                 </div>
                 <div className="md:col-span-3 flex flex-col justify-center space-y-4">
                   <div>
-                    <label className="text-[0.6875rem] uppercase tracking-widest text-on-surface-variant mb-2 block">
+                    <label className="text-[10px] uppercase tracking-widest text-on-surface-variant/60 mb-1.5 block font-bold">
                       Playlist Name
                     </label>
                     <p className="font-headline text-2xl font-bold text-white tracking-tight">
@@ -128,7 +132,7 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
                     </p>
                   </div>
                   <div>
-                    <label className="text-[0.6875rem] uppercase tracking-widest text-on-surface-variant mb-2 block">
+                    <label className="text-[10px] uppercase tracking-widest text-on-surface-variant/60 mb-1.5 block font-bold">
                       Tracks
                     </label>
                     <p className="text-sm text-on-surface-variant">
@@ -142,7 +146,7 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
                           key={mood}
                           className="px-3 py-1 bg-primary/10 text-primary text-xs font-semibold rounded-full border border-primary/20"
                         >
-                          {mood.toUpperCase()}
+                          {mood}
                         </span>
                       ))}
                     </div>
@@ -151,35 +155,35 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
               </div>
 
               {/* Description */}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <label
-                  className="text-[0.6875rem] uppercase tracking-widest text-on-surface-variant block"
+                  className="text-[10px] uppercase tracking-widest text-on-surface-variant/60 block font-bold"
                   htmlFor="export-description"
                 >
-                  Add a Description (Optional)
+                  Description (Optional)
                 </label>
                 <textarea
                   id="export-description"
                   value={currentDraft.description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-surface-container-lowest border-none ring-1 ring-outline-variant/30 focus:ring-primary/60 rounded-xl text-on-surface placeholder:text-outline p-4 transition-all duration-300 resize-none focus:outline-none"
+                  className="w-full bg-surface-container-lowest/50 border-none ring-1 ring-outline-variant/20 focus:ring-primary/50 rounded-xl text-on-surface placeholder:text-outline/40 p-4 transition-all duration-200 resize-none focus:outline-none text-sm"
                   placeholder="Deep atmospheric textures curated via Sonic Atmosphere..."
                   rows={2}
                 />
               </div>
 
               {/* Permissions */}
-              <div className="bg-surface-container-low/50 rounded-xl p-6 border border-outline-variant/10">
+              <div className="bg-surface-container-low/40 rounded-xl p-5 border border-outline-variant/10">
                 <div className="flex gap-4">
-                  <Icon name="security" className="text-secondary mt-1" />
-                  <div className="space-y-2">
+                  <Icon name="security" className="text-secondary shrink-0 mt-0.5" />
+                  <div className="space-y-1.5">
                     <h3 className="font-headline text-sm font-bold text-white">
                       Permissions & Privacy
                     </h3>
                     <p className="text-sm text-on-surface-variant leading-relaxed">
-                      By confirming, <span className="text-white font-medium">Sonic Atmosphere</span> will
-                      create a new public playlist in your Spotify library. We only add tracks; we will
-                      never delete or modify your existing content.
+                      <span className="text-white font-medium">Sonic Atmosphere</span> will
+                      create a new playlist in your Spotify library. We only add tracks — we never
+                      delete or modify your existing content.
                     </p>
                   </div>
                 </div>
@@ -187,14 +191,15 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
 
               {/* Error */}
               {error && (
-                <div className="bg-error-container/20 text-error rounded-xl p-4 text-sm">
+                <div className="bg-error-container/20 text-error rounded-xl p-4 text-sm flex items-center gap-3 animate-fade-in">
+                  <Icon name="error" size="sm" />
                   {error}
                 </div>
               )}
 
               {/* Not connected warning */}
               {!isConnected && (
-                <div className="bg-surface-container-low/50 rounded-xl p-6 text-center">
+                <div className="bg-surface-container-low/50 rounded-xl p-6 text-center animate-fade-in">
                   <p className="text-on-surface-variant mb-4">
                     Connect your Spotify account to export playlists.
                   </p>
@@ -202,6 +207,7 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
                     href="/api/auth/spotify"
                     className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-on-primary rounded-full font-bold"
                   >
+                    <Icon name="link" size="sm" />
                     Connect Spotify
                   </a>
                 </div>
@@ -212,23 +218,30 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
 
         {/* Footer */}
         {!exportedUrl && isConnected && (
-          <div className="p-10 pt-6">
+          <div className="p-8 pt-4">
             <button
               type="button"
               onClick={handleExport}
               disabled={isExporting || currentDraft.tracks.length === 0}
-              className="w-full py-5 bg-primary text-on-primary font-headline text-lg font-extrabold rounded-full flex items-center justify-center gap-3 glow-shadow-strong hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 group disabled:opacity-50"
+              className="w-full py-4 bg-primary text-on-primary font-headline text-lg font-extrabold rounded-full flex items-center justify-center gap-3 glow-shadow-strong hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 group disabled:opacity-50 disabled:hover:scale-100"
             >
-              <span>{isExporting ? "Exporting..." : "Confirm & Export"}</span>
-              {!isExporting && (
-                <Icon
-                  name="arrow_forward"
-                  className="group-hover:translate-x-1 transition-transform"
-                />
+              {isExporting ? (
+                <>
+                  <Icon name="progress_activity" className="animate-spin" />
+                  <span>Exporting...</span>
+                </>
+              ) : (
+                <>
+                  <span>Confirm & Export</span>
+                  <Icon
+                    name="arrow_forward"
+                    className="group-hover:translate-x-1 transition-transform"
+                  />
+                </>
               )}
             </button>
             {user && (
-              <p className="text-center mt-6 text-[0.6875rem] text-on-surface-variant uppercase tracking-widest">
+              <p className="text-center mt-4 text-[10px] text-on-surface-variant/60 uppercase tracking-widest">
                 Connected as <span className="text-white">@{user.display_name}</span>
               </p>
             )}
