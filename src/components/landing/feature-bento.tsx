@@ -12,8 +12,8 @@ export function FeatureBento() {
             </span>
             <h3 className="font-headline text-3xl font-bold mb-4">The Science of Sound</h3>
             <p className="text-on-surface-variant max-w-md leading-relaxed">
-              Our engine goes beyond genres. Dial in the exact texture of your session with
-              precision sonic parameters.
+              Go beyond genres. Fine-tune energy, acousticness, and mood to craft the
+              exact sonic texture you&apos;re after.
             </p>
             <div className="mt-12 space-y-8 max-w-sm">
               <SliderPreview label="Acousticness" value={82} color="primary" delay={0} />
@@ -24,24 +24,22 @@ export function FeatureBento() {
           <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-primary/5 rounded-full blur-3xl group-hover:bg-primary/10 group-hover:scale-110 transition-all duration-700" />
         </div>
 
-        {/* Secondary Card — Visualizer */}
+        {/* Secondary Card — Import & Clean */}
         <div className="md:col-span-4 space-y-6">
           <div className="bg-surface-container-low/40 rounded-2xl p-8 h-full border border-outline-variant/5 hover:bg-surface-container-low/60 hover:border-secondary/10 transition-all duration-500 flex flex-col justify-between group">
             <div>
               <div className="w-12 h-12 rounded-xl bg-secondary/10 flex items-center justify-center text-secondary mb-6 group-hover:scale-110 group-hover:bg-secondary/20 transition-all duration-300">
-                <Icon name="auto_videocam" filled />
+                <Icon name="upload_file" filled />
               </div>
-              <h4 className="text-xl font-bold mb-2">Cinematic Visualizer</h4>
+              <h4 className="text-xl font-bold mb-2">Smart Import</h4>
               <p className="text-sm text-on-surface-variant leading-relaxed">
-                Real-time background generation that adapts to the mood of your music.
+                Paste a setlist, festival lineup, or playlist text &mdash; we&apos;ll reconcile it into clean, matched tracks.
               </p>
             </div>
-            <button
-              type="button"
-              className="mt-8 text-secondary text-sm font-bold flex items-center gap-2 hover:gap-3 transition-all duration-300"
-            >
-              Learn more <Icon name="arrow_forward" size="sm" />
-            </button>
+            <div className="mt-8 text-secondary text-sm font-bold flex items-center gap-2">
+              <Icon name="check_circle" size="sm" />
+              Fuzzy matching built-in
+            </div>
           </div>
         </div>
 
@@ -51,8 +49,11 @@ export function FeatureBento() {
             <div className="w-8 h-8 rounded-lg bg-tertiary/10 flex items-center justify-center text-tertiary group-hover:scale-110 transition-transform duration-300">
               <Icon name="palette" size="sm" />
             </div>
-            <h4 className="text-xl font-bold">Mood Accents</h4>
+            <h4 className="text-xl font-bold">Vibe Anchors</h4>
           </div>
+          <p className="text-sm text-on-surface-variant leading-relaxed mb-4">
+            Tag moods to steer your results &mdash; anchors shape the generation in real time.
+          </p>
           <div className="flex flex-wrap gap-2">
             {[
               { label: "Dreamy", cls: "bg-tertiary/10 text-tertiary" },
@@ -77,7 +78,7 @@ export function FeatureBento() {
           <div className="max-w-md">
             <h4 className="text-2xl font-bold mb-2">Connect Spotify to Start Curating</h4>
             <p className="text-on-surface-variant text-sm leading-relaxed">
-              Sync your listening history to get even more personalized vibe recommendations.
+              Unlock full recommendations, audio feature filtering, and direct playlist export to your Spotify account.
             </p>
           </div>
           <a href="/api/auth/spotify">

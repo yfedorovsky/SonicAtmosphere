@@ -40,14 +40,17 @@ export function FilterSidebar({ filters, onChange, suggestedMoods = [] }: Filter
   // Show suggested first, then remaining preset options
   const presetOptions = MOOD_OPTIONS.filter((m) => !suggestedSet.has(m));
 
+  const activeCount = activeMoods.length;
+
   return (
-    <aside className="w-72 sticky top-24 space-y-10">
-      <div>
-        <h3 className="font-headline text-lg font-bold mb-6 text-on-surface flex items-center gap-2">
-          <Icon name="tune" className="text-primary" />
+    <aside className="w-72 sticky top-24 space-y-8">
+      {/* Sonic DNA */}
+      <div className="bg-surface-container/30 rounded-2xl p-6 border border-white/5">
+        <h3 className="font-headline text-sm font-bold mb-5 text-on-surface flex items-center gap-2 uppercase tracking-wider">
+          <Icon name="tune" className="text-primary" size="sm" />
           Sonic DNA
         </h3>
-        <div className="space-y-8">
+        <div className="space-y-6">
           <SonicSlider
             label="Energy"
             value={filters.energy}
@@ -93,7 +96,7 @@ export function FilterSidebar({ filters, onChange, suggestedMoods = [] }: Filter
           <button
             type="button"
             onClick={() => setShowAllSliders(!showAllSliders)}
-            className="flex items-center gap-1.5 text-xs text-on-surface-variant/70 hover:text-on-surface transition-colors"
+            className="flex items-center gap-1.5 text-xs text-on-surface-variant/60 hover:text-primary transition-colors"
           >
             <Icon name={showAllSliders ? "expand_less" : "expand_more"} size="sm" />
             {showAllSliders ? "Show less" : "More parameters"}
@@ -101,15 +104,24 @@ export function FilterSidebar({ filters, onChange, suggestedMoods = [] }: Filter
         </div>
       </div>
 
-      <div>
-        <h3 className="font-headline text-lg font-bold mb-4 text-on-surface">
-          Vibe Anchors
-        </h3>
+      {/* Vibe Anchors */}
+      <div className="bg-surface-container/30 rounded-2xl p-6 border border-white/5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-headline text-sm font-bold text-on-surface uppercase tracking-wider">
+            Vibe Anchors
+          </h3>
+          {activeCount > 0 && (
+            <span className="text-[10px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-bold tabular-nums">
+              {activeCount} active
+            </span>
+          )}
+        </div>
 
         {/* Suggested (context-aware) anchors */}
         {suggestedMoods.length > 0 && (
           <div className="mb-4">
-            <span className="text-xs text-secondary font-semibold uppercase tracking-wider mb-2 block">
+            <span className="text-[10px] text-secondary font-bold uppercase tracking-wider mb-2 block flex items-center gap-1">
+              <Icon name="auto_awesome" size="sm" className="text-secondary" />
               Suggested
             </span>
             <div className="flex flex-wrap gap-2">
@@ -129,7 +141,7 @@ export function FilterSidebar({ filters, onChange, suggestedMoods = [] }: Filter
         {/* Custom tags */}
         {customMoods.length > 0 && (
           <div className="mb-4">
-            <span className="text-xs text-tertiary font-semibold uppercase tracking-wider mb-2 block">
+            <span className="text-[10px] text-tertiary font-bold uppercase tracking-wider mb-2 block">
               Custom
             </span>
             <div className="flex flex-wrap gap-2">
@@ -159,7 +171,7 @@ export function FilterSidebar({ filters, onChange, suggestedMoods = [] }: Filter
               }
             }}
             placeholder="Add custom vibe..."
-            className="flex-1 bg-surface-container/50 border border-outline-variant/20 rounded-full px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary/50"
+            className="flex-1 bg-surface-container-highest/30 border border-outline-variant/15 rounded-full px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary/50 focus:bg-surface-container-highest/50 transition-all"
           />
           <button
             type="button"

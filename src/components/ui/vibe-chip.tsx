@@ -10,20 +10,20 @@ interface VibeChipProps {
 
 const colorMap = {
   primary: {
-    active: "border-primary bg-primary/20 text-primary shadow-[0_0_12px_rgba(var(--md-primary-rgb,0,255,200),0.3)]",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
+    active: "border-primary bg-primary/25 text-primary ring-1 ring-primary/40 shadow-[0_0_16px_rgba(0,223,193,0.25)]",
+    inactive: "border-white/8 bg-white/5 text-on-surface-variant/70 hover:border-primary/30 hover:text-primary/80 hover:bg-primary/5",
   },
   secondary: {
-    active: "border-secondary bg-secondary/20 text-secondary shadow-[0_0_12px_rgba(var(--md-secondary-rgb,100,200,255),0.3)]",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
+    active: "border-secondary bg-secondary/25 text-secondary ring-1 ring-secondary/40 shadow-[0_0_16px_rgba(205,189,255,0.25)]",
+    inactive: "border-white/8 bg-white/5 text-on-surface-variant/70 hover:border-secondary/30 hover:text-secondary/80 hover:bg-secondary/5",
   },
   tertiary: {
-    active: "border-tertiary bg-tertiary/20 text-tertiary shadow-[0_0_12px_rgba(var(--md-tertiary-rgb,255,180,100),0.3)]",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
+    active: "border-tertiary bg-tertiary/25 text-tertiary ring-1 ring-tertiary/40 shadow-[0_0_16px_rgba(255,177,193,0.25)]",
+    inactive: "border-white/8 bg-white/5 text-on-surface-variant/70 hover:border-tertiary/30 hover:text-tertiary/80 hover:bg-tertiary/5",
   },
   neutral: {
-    active: "border-white/40 bg-white/15 text-on-surface",
-    inactive: "border-white/5 bg-white/5 text-on-surface-variant hover:border-white/15",
+    active: "border-white/40 bg-white/20 text-on-surface ring-1 ring-white/20",
+    inactive: "border-white/8 bg-white/5 text-on-surface-variant/70 hover:border-white/20 hover:bg-white/10",
   },
 };
 
@@ -41,8 +41,8 @@ export function VibeChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "px-4 py-1.5 rounded-full border text-xs font-bold transition-all",
-        "hover:bg-white/10 active:scale-95",
+        "px-3.5 py-1.5 rounded-full border text-xs font-bold transition-all duration-200",
+        "active:scale-95",
         active ? colors.active : colors.inactive,
         onClick && "cursor-pointer",
         className
@@ -50,7 +50,7 @@ export function VibeChip({
     >
       {active && (
         <span className={cn(
-          "inline-block w-1.5 h-1.5 rounded-full mr-2",
+          "inline-block w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse",
           color === "primary" && "bg-primary",
           color === "secondary" && "bg-secondary",
           color === "tertiary" && "bg-tertiary",

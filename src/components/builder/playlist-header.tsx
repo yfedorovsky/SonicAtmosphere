@@ -120,7 +120,7 @@ export function PlaylistHeader() {
                   ) : (
                     <Icon name="auto_awesome" size="sm" />
                   )}
-                  <span className="hidden sm:inline">Auto-Title</span>
+                  <span className="hidden sm:inline">AI Title</span>
                 </button>
                 {alternateTitles.length > 0 && (
                   <button

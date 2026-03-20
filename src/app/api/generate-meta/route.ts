@@ -1,8 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 
-const anthropic = new Anthropic();
-
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
@@ -12,6 +10,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    });
+
     const { prompt, tracks } = await req.json();
 
     // Limit payload: just artist - track name for the first 15 tracks
@@ -28,30 +30,12 @@ export async function POST(req: NextRequest) {
           role: "user",
           content: `Generate 3 creative, cohesive Spotify playlist titles and one short, engaging description (max 2 sentences) based on this user prompt: "${prompt || "curated playlist"}".
 
-Here is a sample of the tracks included for context: ${trackString || "no tracks yet"}`,
+Here is a sample of the tracks included for context: ${trackString || "no tracks yet"}
+
+Respond ONLY with valid JSON in this exact format, no other text:
+{"titles": ["Title 1", "Title 2", "Title 3"], "description": "A short description."}`,
         },
       ],
-      output_config: {
-        format: {
-          type: "json_schema" as const,
-          schema: {
-            type: "object" as const,
-            properties: {
-              titles: {
-                type: "array" as const,
-                items: { type: "string" as const },
-                description: "Array of 3 playlist title options",
-              },
-              description: {
-                type: "string" as const,
-                description: "A short, engaging playlist description",
-              },
-            },
-            required: ["titles", "description"],
-            additionalProperties: false,
-          },
-        },
-      },
     });
 
     const textBlock = response.content.find((c) => c.type === "text");
@@ -62,7 +46,13 @@ Here is a sample of the tracks included for context: ${trackString || "no tracks
       );
     }
 
-    const metadata = JSON.parse(textBlock.text);
+    // Extract JSON from response (handle potential markdown code blocks)
+    let jsonStr = textBlock.text.trim();
+    if (jsonStr.startsWith("```")) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    }
+
+    const metadata = JSON.parse(jsonStr);
     return NextResponse.json(metadata);
   } catch (error) {
     console.error("Claude API Error:", error);

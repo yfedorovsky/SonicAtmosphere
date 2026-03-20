@@ -9,6 +9,7 @@ import { FilterSidebar } from "@/components/generator/filter-sidebar";
 import { TrackResultsList } from "@/components/generator/track-results-list";
 import { CurrentDraftPanel } from "@/components/generator/current-draft-panel";
 import { ImportModal } from "@/components/import/import-modal";
+import { Icon } from "@/components/ui/icon";
 import { useDraftsStore } from "@/stores/drafts-store";
 import type { GeneratorMode, FilterValues, SpotifyTrack } from "@/types";
 import { DEFAULT_FILTERS, suggestMoodsFromPrompt } from "@/types";
@@ -32,6 +33,7 @@ function GeneratorContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [suggestedMoods, setSuggestedMoods] = useState<string[]>([]);
   const addRecentPrompt = useDraftsStore((s) => s.addRecentPrompt);
   const isAutoSelectingRef = useRef(false);
@@ -111,10 +113,12 @@ function GeneratorContent() {
     }
   }
 
+  const activeFilterCount = filters.moods.length;
+
   return (
     <AppShell>
       {/* Hero prompt section */}
-      <section className="max-w-4xl py-10 animate-fade-up">
+      <section className="max-w-4xl mx-auto py-10 animate-fade-up">
         <label className="text-xs uppercase tracking-[0.2em] text-secondary mb-4 block font-semibold">
           AI Multi-Modal Prompt
         </label>
@@ -128,7 +132,7 @@ function GeneratorContent() {
           isLoading={isLoading}
           placeholder={
             mode === "song"
-              ? "Enter a song name, e.g., 'Heartbeats by José González'"
+              ? "Enter a song name, e.g., 'Heartbeats by Jos\u00e9 Gonz\u00e1lez'"
               : mode === "artist"
                 ? "Enter an artist name, e.g., 'Radiohead'"
                 : mode === "genre"
@@ -137,6 +141,42 @@ function GeneratorContent() {
           }
         />
       </section>
+
+      {/* Mobile filter toggle */}
+      <div className="lg:hidden flex justify-end mb-4">
+        <button
+          type="button"
+          onClick={() => setShowMobileFilters(!showMobileFilters)}
+          className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-container/60 border border-white/10 text-sm font-bold text-on-surface-variant hover:text-primary hover:border-primary/30 transition-all"
+        >
+          <Icon name="tune" size="sm" />
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="bg-primary/20 text-primary text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Mobile filter drawer */}
+      {showMobileFilters && (
+        <div className="lg:hidden mb-6 animate-fade-in">
+          <div className="bg-surface-container/60 backdrop-blur-xl rounded-2xl border border-white/10 p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-headline text-sm font-bold uppercase tracking-wider">Filters</h3>
+              <button
+                type="button"
+                onClick={() => setShowMobileFilters(false)}
+                className="text-on-surface-variant hover:text-primary"
+              >
+                <Icon name="close" size="sm" />
+              </button>
+            </div>
+            <FilterSidebar filters={filters} onChange={setFilters} suggestedMoods={suggestedMoods} />
+          </div>
+        </div>
+      )}
 
       {/* Two-column layout: filters | results */}
       <div className="flex gap-10 items-start pb-8">
