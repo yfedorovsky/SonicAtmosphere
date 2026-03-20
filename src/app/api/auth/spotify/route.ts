@@ -10,7 +10,7 @@ const SCOPES = [
 
 export async function GET() {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/auth/spotify/callback`;
+  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}/api/auth/spotify/callback`;
 
   if (!clientId) {
     return NextResponse.json(

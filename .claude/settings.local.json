@@ -9,7 +9,15 @@
       "Bash(npx next build)",
       "Bash(npm install)",
       "Bash(git init)",
-      "Bash(git add -A)"
+      "Bash(git add -A)",
+      "Bash(git commit:*)",
+      "Bash(gh repo create yfedorovsky/spotifyplaylistcreator --public --source=. --remote=origin --push)",
+      "Bash(where gh)",
+      "Bash(git remote add origin https://github.com/yfedorovsky/spotifyplaylistcreator.git)",
+      "Bash(npm --version)",
+      "Bash(git push -u origin master)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(cmd.exe /c \"rename spotifyplaylistcreator SonicAtmosphere\")"
     ]
   }
 }

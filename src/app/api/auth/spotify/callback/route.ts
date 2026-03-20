@@ -7,23 +7,23 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}?auth_error=${error}`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=${error}`
     );
   }
 
   if (!code) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}?auth_error=no_code`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=no_code`
     );
   }
 
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/auth/spotify/callback`;
+  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}/api/auth/spotify/callback`;
 
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}?auth_error=config`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=config`
     );
   }
 
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}?auth_error=token_exchange`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=token_exchange`
       );
     }
 
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     // In production, use a proper session/cookie approach
 
     const redirectUrl = new URL(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/library`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}/library`
     );
     redirectUrl.searchParams.set("auth_success", "true");
     if (profile) {
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     return response;
   } catch {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}?auth_error=unknown`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=unknown`
     );
   }
 }

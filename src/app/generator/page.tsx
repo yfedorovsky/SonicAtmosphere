@@ -41,9 +41,17 @@ function GeneratorContent() {
     addRecentPrompt(prompt.trim());
 
     try {
-      const res = await fetch(
-        `/api/spotify/search?q=${encodeURIComponent(prompt.trim())}&type=${mode}`
-      );
+      const params = new URLSearchParams({
+        q: prompt.trim(),
+        type: mode,
+        energy: String(filters.energy),
+        acousticness: String(filters.acousticness),
+        popularity: String(filters.popularity),
+      });
+      if (filters.moods.length > 0) {
+        params.set("moods", filters.moods.join(","));
+      }
+      const res = await fetch(`/api/spotify/search?${params}`);
       if (res.ok) {
         const data = await res.json();
         setResults(data.tracks || []);
@@ -55,7 +63,7 @@ function GeneratorContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, mode, addRecentPrompt]);
+  }, [prompt, mode, filters, addRecentPrompt]);
 
   // Auto-generate if prompt came from URL
   useEffect(() => {

@@ -1,18 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAccessToken, getRecommendations } from "@/lib/spotify";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const seedTracks = searchParams.get("seed_tracks") || "";
-  const seedArtists = searchParams.get("seed_artists") || "";
+  const accessToken = await getAccessToken();
 
-  // TODO: Wire to real Spotify Recommendations API
-  // This endpoint will use:
-  // - seed_tracks, seed_artists, seed_genres
-  // - target_energy, target_acousticness, target_popularity
-  // to get personalized recommendations
+  if (!accessToken) {
+    return NextResponse.json(
+      { error: "Not authenticated. Connect Spotify first." },
+      { status: 401 }
+    );
+  }
 
-  return NextResponse.json({
-    tracks: [],
-    message: "Recommendations endpoint stub. Connect Spotify to enable.",
-  });
+  const params = {
+    seed_tracks: searchParams.get("seed_tracks") || undefined,
+    seed_artists: searchParams.get("seed_artists") || undefined,
+    seed_genres: searchParams.get("seed_genres") || undefined,
+    target_energy: searchParams.has("energy")
+      ? parseInt(searchParams.get("energy")!)
+      : undefined,
+    target_acousticness: searchParams.has("acousticness")
+      ? parseInt(searchParams.get("acousticness")!)
+      : undefined,
+    target_popularity: searchParams.has("popularity")
+      ? parseInt(searchParams.get("popularity")!)
+      : undefined,
+    limit: parseInt(searchParams.get("limit") || "20"),
+  };
+
+  const tracks = await getRecommendations(accessToken, params);
+  return NextResponse.json({ tracks });
 }
