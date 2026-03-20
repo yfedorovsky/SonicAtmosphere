@@ -21,6 +21,7 @@ export function ParsedTrackReview({
     tracks.map((t) => ({ parsed: t, match: null, status: "unmatched" }))
   );
   const [isMatching, setIsMatching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [matchProgress, setMatchProgress] = useState(0);
   const { addTrack } = usePlaylistStore();
 
@@ -52,6 +53,7 @@ export function ParsedTrackReview({
     }
 
     setIsMatching(false);
+    setHasSearched(true);
   }, [matchedTracks]);
 
   function handleConfirmAll() {
@@ -128,7 +130,7 @@ export function ParsedTrackReview({
                   {mt.parsed.artist && " — "}
                   {mt.parsed.title}
                 </p>
-                {!isMatching && (
+                {!isMatching && hasSearched && (
                   <p className="text-xs text-error/70">No match found</p>
                 )}
               </div>

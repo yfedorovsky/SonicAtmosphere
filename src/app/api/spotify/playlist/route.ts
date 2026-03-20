@@ -1,8 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getCurrentUser, createPlaylist } from "@/lib/spotify";
+import { getAccessToken, getRefreshToken, refreshAccessToken, getCurrentUser, createPlaylist } from "@/lib/spotify";
+import { cookies } from "next/headers";
 
 export async function POST(request: NextRequest) {
-  const accessToken = await getAccessToken();
+  let accessToken = await getAccessToken();
+
+  if (!accessToken) {
+    // Try refreshing
+    const refreshToken = await getRefreshToken();
+    if (refreshToken) {
+      const result = await refreshAccessToken(refreshToken);
+      if (result) {
+        accessToken = result.access_token;
+        const cookieStore = await cookies();
+        cookieStore.set("spotify_access_token", result.access_token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: result.expires_in,
+          path: "/",
+        });
+      }
+    }
+  }
 
   if (!accessToken) {
     return NextResponse.json(
@@ -23,8 +43,9 @@ export async function POST(request: NextRequest) {
 
   const user = await getCurrentUser(accessToken);
   if (!user) {
+    console.error("[playlist] Could not retrieve user profile — token may be expired");
     return NextResponse.json(
-      { error: "Could not retrieve Spotify user profile." },
+      { error: "Could not retrieve Spotify user profile. Try reconnecting Spotify." },
       { status: 500 }
     );
   }
@@ -37,10 +58,11 @@ export async function POST(request: NextRequest) {
     trackUris
   );
 
-  if (!result) {
+  if ("error" in result) {
+    console.error("[playlist] Spotify API rejected playlist creation:", result.error);
     return NextResponse.json(
-      { error: "Failed to create playlist. Please try again." },
-      { status: 500 }
+      { error: `Spotify error (${result.status}): ${result.error}` },
+      { status: result.status }
     );
   }
 

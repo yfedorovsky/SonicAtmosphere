@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SCOPES = [
+  "playlist-read-private",
+  "playlist-read-collaborative",
   "playlist-modify-public",
   "playlist-modify-private",
   "user-read-private",

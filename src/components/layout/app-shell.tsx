@@ -30,27 +30,33 @@ export function AppShell({
 
   // Check auth status on mount
   useEffect(() => {
-    if (isConnected) return;
+    let cancelled = false;
 
     setLoading(true);
     fetch("/api/auth/status")
       .then((res) => res.json())
       .then((data) => {
+        if (cancelled) return;
         if (data.connected && data.user) {
           setConnected(data.user);
         } else {
           setDisconnected();
         }
       })
-      .catch(() => setDisconnected());
-  }, [isConnected, setConnected, setDisconnected, setLoading]);
+      .catch(() => {
+        if (!cancelled) setDisconnected();
+      });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
       <AuroraBackground />
       <Sidebar />
       <TopNav />
-      <main className="md:ml-64 pt-20 pb-32 min-h-screen px-6 md:px-10 relative">
+      <main className="md:ml-64 pt-20 pb-28 min-h-screen px-6 md:px-10 relative">
         {children}
       </main>
       {showBottomBar && <BottomBar showExport={showExport} onExport={onExport} />}

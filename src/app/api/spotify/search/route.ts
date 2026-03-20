@@ -6,7 +6,7 @@ import { DEFAULT_FILTERS, type GeneratorMode } from "@/types";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q") || "";
-  const type = (searchParams.get("type") || "vibe") as GeneratorMode;
+  const type = searchParams.get("type") || "vibe";
   const limit = parseInt(searchParams.get("limit") || "20");
 
   if (!query) {
@@ -30,6 +30,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ tracks });
   }
 
+  // Direct track search (used by import matching)
+  if (type === "track") {
+    const tracks = await searchTracks(query, accessToken, limit);
+    return NextResponse.json({ tracks });
+  }
+
   // Full recommendations with user token
   const filters = {
     energy: parseInt(searchParams.get("energy") || "50"),
@@ -38,7 +44,7 @@ export async function GET(request: NextRequest) {
     moods: searchParams.get("moods")?.split(",").filter(Boolean) || [],
   };
 
-  const tracks = await generateRecommendations(accessToken, query, type, filters);
+  const tracks = await generateRecommendations(accessToken, query, type as GeneratorMode, filters);
   return NextResponse.json({ tracks });
 }
 

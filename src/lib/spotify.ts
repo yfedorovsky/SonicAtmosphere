@@ -159,28 +159,34 @@ export async function createPlaylist(
   name: string,
   description: string,
   trackUris: string[]
-): Promise<{ url: string; id: string } | null> {
+): Promise<{ url: string; id: string } | { error: string; status: number; step: string }> {
   // Create the playlist
-  const createRes = await spotifyFetch(`/users/${userId}/playlists`, accessToken, {
+  const createRes = await spotifyFetch("/me/playlists", accessToken, {
     method: "POST",
     body: JSON.stringify({
       name,
       description,
-      public: true,
+      public: false,
     }),
   });
 
-  if (!createRes.ok) return null;
+  if (!createRes.ok) {
+    const err = await createRes.text();
+    return { error: err, status: createRes.status, step: "create" };
+  }
   const playlist = await createRes.json();
 
   // Add tracks (Spotify allows max 100 per request)
   for (let i = 0; i < trackUris.length; i += 100) {
     const batch = trackUris.slice(i, i + 100);
-    const addRes = await spotifyFetch(`/playlists/${playlist.id}/tracks`, accessToken, {
+    const addRes = await spotifyFetch(`/playlists/${playlist.id}/items`, accessToken, {
       method: "POST",
       body: JSON.stringify({ uris: batch }),
     });
-    if (!addRes.ok) return null;
+    if (!addRes.ok) {
+      const err = await addRes.text();
+      return { error: err, status: addRes.status, step: "add_tracks" };
+    }
   }
 
   return {

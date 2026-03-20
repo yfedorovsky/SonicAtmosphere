@@ -61,14 +61,7 @@ export async function GET(request: NextRequest) {
     // For MVP, we'll pass them via URL fragment to the client
     // In production, use a proper session/cookie approach
 
-    const redirectUrl = new URL(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}/library`
-    );
-    redirectUrl.searchParams.set("auth_success", "true");
-    if (profile) {
-      redirectUrl.searchParams.set("user_name", profile.display_name || "");
-      redirectUrl.searchParams.set("user_id", profile.id || "");
-    }
+    const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}/library`;
 
     const response = NextResponse.redirect(redirectUrl);
 
