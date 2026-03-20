@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Icon } from "@/components/ui/icon";
 import { usePlaylistStore } from "@/stores/playlist-store";
 import { usePlaybackStore } from "@/stores/playback-store";
@@ -12,6 +13,48 @@ export function PlaylistHeader() {
   const totalMs = currentDraft.tracks.reduce((sum, t) => sum + t.duration_ms, 0);
   const coverUrl = currentDraft.coverUrl || currentDraft.tracks[0]?.album.images[0]?.url;
   const firstTrack = currentDraft.tracks[0];
+
+  const [isGeneratingMeta, setIsGeneratingMeta] = useState(false);
+  const [alternateTitles, setAlternateTitles] = useState<string[]>([]);
+  const [titleIndex, setTitleIndex] = useState(0);
+
+  async function handleAutoTitle() {
+    if (currentDraft.tracks.length === 0) return;
+    setIsGeneratingMeta(true);
+
+    try {
+      const res = await fetch("/api/generate-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: currentDraft.prompt,
+          tracks: currentDraft.tracks.slice(0, 15).map((t) => ({
+            artist: t.artists[0]?.name || "",
+            name: t.name,
+          })),
+        }),
+      });
+
+      if (res.ok) {
+        const { titles, description } = await res.json();
+        if (titles?.[0]) setTitle(titles[0]);
+        if (description) setDescription(description);
+        setAlternateTitles(titles?.slice(1) || []);
+        setTitleIndex(0);
+      }
+    } catch {
+      // Fail silently — user can still type manually
+    } finally {
+      setIsGeneratingMeta(false);
+    }
+  }
+
+  function cycleTitles() {
+    if (alternateTitles.length === 0) return;
+    const nextIndex = (titleIndex + 1) % alternateTitles.length;
+    setTitleIndex(nextIndex);
+    setTitle(alternateTitles[nextIndex]);
+  }
 
   return (
     <section className="relative -mx-6 md:-mx-10 -mt-20 pt-20 overflow-hidden">
@@ -59,9 +102,39 @@ export function PlaylistHeader() {
 
         {/* Glass info panel */}
         <div className="flex-1 max-w-2xl bg-surface-container/40 backdrop-blur-xl p-8 rounded-2xl border border-outline-variant/10 shadow-[0_0_64px_rgba(0,0,0,0.5)]">
-          <span className="text-xs font-bold uppercase tracking-[0.2em] text-secondary mb-2 block">
-            Curation In Progress
-          </span>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold uppercase tracking-[0.2em] text-secondary">
+              Curation In Progress
+            </span>
+            {count > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAutoTitle}
+                  disabled={isGeneratingMeta}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary/10 text-secondary text-xs font-bold hover:bg-secondary/20 transition-all disabled:opacity-50"
+                  title="Generate title & description with AI"
+                >
+                  {isGeneratingMeta ? (
+                    <Icon name="progress_activity" size="sm" className="animate-spin" />
+                  ) : (
+                    <Icon name="auto_awesome" size="sm" />
+                  )}
+                  <span className="hidden sm:inline">Auto-Title</span>
+                </button>
+                {alternateTitles.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={cycleTitles}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-white/5 text-on-surface-variant text-xs font-bold hover:bg-white/10 transition-all"
+                    title="Cycle through title options"
+                  >
+                    <Icon name="sync" size="sm" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <input
             type="text"
             value={currentDraft.title}

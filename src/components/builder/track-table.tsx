@@ -8,11 +8,14 @@ import {
 } from "@hello-pangea/dnd";
 import { TrackRow } from "./track-row";
 import { AddTrackButton } from "./add-track-button";
-import { usePlaylistStore } from "@/stores/playlist-store";
+import { usePlaylistStore, useTemporalStore } from "@/stores/playlist-store";
+import { useVibeDrift } from "@/hooks/use-vibe-drift";
 import { Icon } from "@/components/ui/icon";
 
 export function TrackTable() {
   const { currentDraft, removeTrack, reorderTracks } = usePlaylistStore();
+  const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
+  const { driftScores, outlierIds } = useVibeDrift(currentDraft.tracks);
 
   function handleDragEnd(result: DropResult) {
     if (!result.destination) return;
@@ -38,6 +41,31 @@ export function TrackTable() {
 
   return (
     <div className="space-y-2">
+      {/* Tracklist header with undo/redo */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-headline text-2xl font-bold">Tracklist</h2>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => undo()}
+            disabled={pastStates.length === 0}
+            className="p-2 rounded-full text-on-surface-variant hover:text-primary hover:bg-white/5 transition-all disabled:opacity-30 disabled:hover:text-on-surface-variant disabled:hover:bg-transparent"
+            title="Undo"
+          >
+            <Icon name="undo" size="sm" />
+          </button>
+          <button
+            type="button"
+            onClick={() => redo()}
+            disabled={futureStates.length === 0}
+            className="p-2 rounded-full text-on-surface-variant hover:text-primary hover:bg-white/5 transition-all disabled:opacity-30 disabled:hover:text-on-surface-variant disabled:hover:bg-transparent"
+            title="Redo"
+          >
+            <Icon name="redo" size="sm" />
+          </button>
+        </div>
+      </div>
+
       {/* Table header */}
       <div className="grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 px-6 py-3 text-[11px] uppercase tracking-[0.15em] text-on-surface-variant/60 font-bold border-b border-white/5">
         <span className="text-center">#</span>
@@ -69,6 +97,8 @@ export function TrackTable() {
                         track={track}
                         index={index}
                         onRemove={() => removeTrack(track.id)}
+                        isOutlier={outlierIds.has(track.id)}
+                        driftScore={driftScores[track.id]}
                         dragHandleProps={provided.dragHandleProps ?? undefined}
                       />
                     </div>

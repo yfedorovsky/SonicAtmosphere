@@ -10,11 +10,13 @@ interface TrackRowProps {
   track: SpotifyTrack;
   index: number;
   onRemove: () => void;
+  isOutlier?: boolean;
+  driftScore?: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dragHandleProps?: any;
 }
 
-export function TrackRow({ track, index, onRemove, dragHandleProps }: TrackRowProps) {
+export function TrackRow({ track, index, onRemove, isOutlier, driftScore, dragHandleProps }: TrackRowProps) {
   const albumArt = track.album.images[track.album.images.length - 1]?.url;
   const { currentTrack, isPlaying, toggle } = usePlaybackStore();
   const isCurrentlyPlaying = currentTrack?.id === track.id && isPlaying;
@@ -23,7 +25,7 @@ export function TrackRow({ track, index, onRemove, dragHandleProps }: TrackRowPr
   return (
     <div className={cn(
       "grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 items-center px-6 py-3 rounded-xl transition-all duration-200 group cursor-grab active:cursor-grabbing",
-      isCurrentlyPlaying ? "bg-primary/5" : "hover:bg-white/5"
+      isCurrentlyPlaying ? "bg-primary/5" : isOutlier ? "bg-tertiary/5 border border-tertiary/15" : "hover:bg-white/5"
     )}>
       {/* Index / play / drag handle */}
       <div className="text-center" {...dragHandleProps}>
@@ -77,6 +79,12 @@ export function TrackRow({ track, index, onRemove, dragHandleProps }: TrackRowPr
           <span className="text-sm text-on-surface-variant truncate">
             {track.artists.map((a) => a.name).join(", ")}
           </span>
+          {isOutlier && (
+            <span className="text-[10px] text-tertiary flex items-center gap-1 mt-0.5" title={`Vibe drift: ${Math.round((driftScore || 0) * 100)}%`}>
+              <Icon name="warning" size="sm" className="text-tertiary" />
+              Vibe breaker
+            </span>
+          )}
         </div>
       </div>
 

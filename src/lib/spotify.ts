@@ -95,17 +95,28 @@ export async function searchArtists(
   }));
 }
 
+export interface RecommendationParams {
+  seed_tracks?: string;
+  seed_artists?: string;
+  seed_genres?: string;
+  target_energy?: number;
+  target_acousticness?: number;
+  target_popularity?: number;
+  // Negative prompting: max/min constraints
+  max_energy?: number;
+  min_energy?: number;
+  max_acousticness?: number;
+  min_acousticness?: number;
+  max_popularity?: number;
+  min_popularity?: number;
+  max_valence?: number;
+  min_valence?: number;
+  limit?: number;
+}
+
 export async function getRecommendations(
   accessToken: string,
-  params: {
-    seed_tracks?: string;
-    seed_artists?: string;
-    seed_genres?: string;
-    target_energy?: number;
-    target_acousticness?: number;
-    target_popularity?: number;
-    limit?: number;
-  }
+  params: RecommendationParams
 ): Promise<SpotifyTrack[]> {
   const searchParams = new URLSearchParams();
 
@@ -118,6 +129,25 @@ export async function getRecommendations(
     searchParams.set("target_acousticness", String(params.target_acousticness / 100));
   if (params.target_popularity !== undefined)
     searchParams.set("target_popularity", String(params.target_popularity));
+
+  // Negative prompting constraints
+  if (params.max_energy !== undefined)
+    searchParams.set("max_energy", String(params.max_energy / 100));
+  if (params.min_energy !== undefined)
+    searchParams.set("min_energy", String(params.min_energy / 100));
+  if (params.max_acousticness !== undefined)
+    searchParams.set("max_acousticness", String(params.max_acousticness / 100));
+  if (params.min_acousticness !== undefined)
+    searchParams.set("min_acousticness", String(params.min_acousticness / 100));
+  if (params.max_popularity !== undefined)
+    searchParams.set("max_popularity", String(params.max_popularity));
+  if (params.min_popularity !== undefined)
+    searchParams.set("min_popularity", String(params.min_popularity));
+  if (params.max_valence !== undefined)
+    searchParams.set("max_valence", String(params.max_valence / 100));
+  if (params.min_valence !== undefined)
+    searchParams.set("min_valence", String(params.min_valence / 100));
+
   searchParams.set("limit", String(params.limit || 20));
 
   const res = await spotifyFetch(`/recommendations?${searchParams}`, accessToken);
@@ -125,6 +155,34 @@ export async function getRecommendations(
 
   const data = await res.json();
   return (data.tracks || []).map(mapSpotifyTrack);
+}
+
+// Fetch audio features for a batch of tracks (max 100)
+export async function getAudioFeatures(
+  accessToken: string,
+  trackIds: string[]
+): Promise<AudioFeatures[]> {
+  if (trackIds.length === 0) return [];
+  const ids = trackIds.slice(0, 100).join(",");
+  const res = await spotifyFetch(`/audio-features?ids=${ids}`, accessToken);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.audio_features || []).filter(Boolean);
+}
+
+export interface AudioFeatures {
+  id: string;
+  energy: number;
+  acousticness: number;
+  danceability: number;
+  valence: number;
+  tempo: number;
+  key: number;
+  mode: number;
+  loudness: number;
+  speechiness: number;
+  instrumentalness: number;
+  liveness: number;
 }
 
 export async function getArtistTopTracks(
