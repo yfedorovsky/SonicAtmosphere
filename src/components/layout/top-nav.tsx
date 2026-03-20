@@ -8,7 +8,7 @@ export function TopNav() {
   const { isConnected } = useAuthStore();
 
   return (
-    <header className="fixed top-0 right-0 w-full md:w-[calc(100%-16rem)] h-16 z-40 bg-[#131315]/60 backdrop-blur-2xl border-b border-white/5 flex justify-between items-center px-6 md:px-10 text-sm font-medium">
+    <header className="fixed top-0 right-0 w-full md:w-[calc(100%-6rem)] h-16 z-40 bg-[#131315]/60 backdrop-blur-2xl border-b border-white/5 flex justify-between items-center px-6 md:px-10 text-sm font-medium">
       {/* Search */}
       <div className="flex items-center flex-1 max-w-md bg-surface-container-lowest/40 rounded-full px-4 py-2 focus-within:ring-1 focus-within:ring-primary/30 focus-within:bg-surface-container-lowest/60 transition-all duration-200">
         <Icon name="search" className="text-on-surface-variant/60 text-xl mr-2" />
@@ -40,15 +40,6 @@ export function TopNav() {
         <button type="button" className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-white/5 transition-all duration-200">
           <Icon name="account_circle" />
         </button>
-        {!isConnected && (
-          <a
-            href="/api/auth/spotify"
-            className="hidden md:flex items-center gap-2 px-5 py-2 bg-primary/10 text-primary border border-primary/20 rounded-full text-xs font-bold hover:bg-primary/20 transition-all duration-200"
-          >
-            <Icon name="link" size="sm" />
-            Connect Spotify
-          </a>
-        )}
       </div>
     </header>
   );

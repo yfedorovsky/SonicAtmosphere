@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { TrackResult } from "./track-result";
 import { Icon } from "@/components/ui/icon";
+import { cn } from "@/lib/utils";
 import type { SpotifyTrack } from "@/types";
 
 interface TrackResultsListProps {
@@ -15,29 +17,32 @@ export function TrackResultsList({
   isLoading = false,
   hasSearched = false,
 }: TrackResultsListProps) {
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+
   if (isLoading) {
     return (
-      <div className="space-y-4 animate-fade-in">
-        <div className="flex items-center justify-between mb-6">
+      <div className="animate-fade-in">
+        <div className="flex items-center justify-between mb-8">
           <h3 className="font-headline text-xl font-bold flex items-center gap-3">
             <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" />
             Generating...
           </h3>
         </div>
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div
-            key={i}
-            className={`flex items-center gap-6 p-4 rounded-xl bg-surface-container/30 animate-pulse stagger-${i}`}
-            style={{ animationDelay: `${i * 100}ms` }}
-          >
-            <div className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-surface-container-highest" />
-            <div className="flex-1 space-y-3">
-              <div className="h-5 w-48 bg-surface-container-highest rounded" />
-              <div className="h-4 w-32 bg-surface-container-highest rounded" />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div
+              key={i}
+              className="bg-surface-container-low/60 rounded-2xl p-4 animate-pulse"
+              style={{ animationDelay: `${i * 100}ms` }}
+            >
+              <div className="aspect-square rounded-xl bg-surface-container-highest mb-4" />
+              <div className="space-y-2">
+                <div className="h-4 w-3/4 bg-surface-container-highest rounded" />
+                <div className="h-3 w-1/2 bg-surface-container-highest rounded" />
+              </div>
             </div>
-            <div className="w-10 h-10 rounded-full bg-surface-container-highest" />
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     );
   }
@@ -75,22 +80,65 @@ export function TrackResultsList({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between mb-6 animate-fade-in">
-        <h3 className="font-headline text-xl font-bold">Tailored Suggestions</h3>
-        <span className="text-xs uppercase tracking-wider text-on-surface-variant bg-surface-container-high/50 px-3 py-1 rounded-full">
-          {tracks.length} Tracks
-        </span>
-      </div>
-      {tracks.map((track, i) => (
-        <div
-          key={track.id}
-          className="animate-fade-up"
-          style={{ animationDelay: `${i * 50}ms` }}
-        >
-          <TrackResult track={track} />
+    <div>
+      <div className="flex justify-between items-end mb-8 animate-fade-in">
+        <div>
+          <h2 className="font-headline text-2xl font-extrabold tracking-tight">Generated Atmosphere</h2>
+          <p className="text-on-surface-variant text-sm">{tracks.length} tracks matching your frequency</p>
         </div>
-      ))}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setViewMode("grid")}
+            className={cn(
+              "p-2 rounded-full transition-colors",
+              viewMode === "grid"
+                ? "bg-surface-container-high text-primary"
+                : "bg-surface-container-high/50 text-on-surface-variant hover:text-primary"
+            )}
+          >
+            <Icon name="grid_view" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("list")}
+            className={cn(
+              "p-2 rounded-full transition-colors",
+              viewMode === "list"
+                ? "bg-surface-container-high text-primary"
+                : "bg-surface-container-high/50 text-on-surface-variant hover:text-primary"
+            )}
+          >
+            <Icon name="view_list" />
+          </button>
+        </div>
+      </div>
+
+      {viewMode === "grid" ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {tracks.map((track, i) => (
+            <div
+              key={track.id}
+              className="animate-fade-up"
+              style={{ animationDelay: `${i * 50}ms` }}
+            >
+              <TrackResult track={track} viewMode="grid" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {tracks.map((track, i) => (
+            <div
+              key={track.id}
+              className="animate-fade-up"
+              style={{ animationDelay: `${i * 50}ms` }}
+            >
+              <TrackResult track={track} viewMode="list" />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -64,7 +64,7 @@ export function PreviewPlayer() {
   return (
     <>
       <audio ref={audioRef} />
-      <div className="fixed bottom-20 md:bottom-0 right-0 w-full md:w-[calc(100%-16rem)] z-[55] animate-fade-up">
+      <div className="fixed bottom-20 md:bottom-0 right-0 w-full md:w-[calc(100%-6rem)] z-[55] animate-fade-up">
         <div className="mx-4 md:mx-8 mb-4 md:mb-6 bg-surface-container/90 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl shadow-black/50 p-3 flex items-center gap-4">
           {/* Album art */}
           <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 shadow-md">

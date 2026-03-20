@@ -83,55 +83,48 @@ function GeneratorContent() {
 
   return (
     <AppShell>
-      <div className="max-w-7xl mx-auto py-8">
-        <div className="animate-fade-up mb-8">
-          <h2 className="font-headline text-4xl font-extrabold tracking-tighter leading-none">
-            Curate Your Soundscape
-          </h2>
-          <p className="text-on-surface-variant/50 mt-2 text-sm">Discover tracks that match your mood</p>
+      {/* Hero prompt section */}
+      <section className="max-w-4xl py-10 animate-fade-up">
+        <label className="text-xs uppercase tracking-[0.2em] text-secondary mb-4 block font-semibold">
+          AI Multi-Modal Prompt
+        </label>
+        <div className="mb-6">
+          <ModeSelector mode={mode} onChange={handleModeChange} />
+        </div>
+        <PromptInput
+          value={prompt}
+          onChange={setPrompt}
+          onGenerate={handleGenerate}
+          isLoading={isLoading}
+          placeholder={
+            mode === "song"
+              ? "Enter a song name, e.g., 'Heartbeats by José González'"
+              : mode === "artist"
+                ? "Enter an artist name, e.g., 'Radiohead'"
+                : mode === "genre"
+                  ? "Enter a genre, e.g., 'shoegaze', 'ambient electronic'"
+                  : "Describe the vibe... 'Late night neon rainy city streets with lo-fi jazz beats'"
+          }
+        />
+      </section>
+
+      {/* Two-column layout: filters | results */}
+      <div className="flex gap-10 items-start pb-8">
+        <div className="hidden lg:block shrink-0">
+          <FilterSidebar filters={filters} onChange={setFilters} />
         </div>
 
-        {/* Mode selector + Prompt input */}
-        <section className="mb-10 animate-fade-up stagger-2">
-          <div className="mb-6">
-            <ModeSelector mode={mode} onChange={handleModeChange} />
-          </div>
-          <PromptInput
-            value={prompt}
-            onChange={setPrompt}
-            onGenerate={handleGenerate}
+        <div className="flex-1 min-w-0">
+          <TrackResultsList
+            tracks={results}
             isLoading={isLoading}
-            placeholder={
-              mode === "song"
-                ? "Enter a song name, e.g., 'Heartbeats by José González'"
-                : mode === "artist"
-                  ? "Enter an artist name, e.g., 'Radiohead'"
-                  : mode === "genre"
-                    ? "Enter a genre, e.g., 'shoegaze', 'ambient electronic'"
-                    : "Describe your mood, e.g., 'late night indie folk with soft vocals'"
-            }
+            hasSearched={hasSearched}
           />
-        </section>
-
-        {/* Three-column layout: filters | results | draft */}
-        <div className="flex gap-10 items-start">
-          <div className="hidden lg:block">
-            <FilterSidebar filters={filters} onChange={setFilters} />
-          </div>
-
-          <div className="flex-1">
-            <TrackResultsList
-              tracks={results}
-              isLoading={isLoading}
-              hasSearched={hasSearched}
-            />
-          </div>
-
-          <div className="hidden xl:block">
-            <CurrentDraftPanel />
-          </div>
         </div>
       </div>
+
+      {/* Floating draft panel (shows when tracks added) */}
+      <CurrentDraftPanel />
 
       {/* Import modal */}
       <ImportModal

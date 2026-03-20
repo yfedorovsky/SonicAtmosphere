@@ -2,6 +2,7 @@
 
 import { SonicSlider } from "@/components/ui/sonic-slider";
 import { VibeChip } from "@/components/ui/vibe-chip";
+import { Icon } from "@/components/ui/icon";
 import { MOOD_OPTIONS, type FilterValues } from "@/types";
 
 interface FilterSidebarProps {
@@ -20,9 +21,9 @@ export function FilterSidebar({ filters, onChange }: FilterSidebarProps) {
   return (
     <aside className="w-72 sticky top-24 space-y-10">
       <div>
-        <h3 className="font-headline text-xs font-bold tracking-[0.15em] uppercase text-on-surface-variant mb-6 flex items-center gap-2">
-          <span className="w-1 h-4 rounded-full bg-primary" />
-          Atmospheric Filters
+        <h3 className="font-headline text-lg font-bold mb-6 text-on-surface flex items-center gap-2">
+          <Icon name="tune" className="text-primary" />
+          Sonic DNA
         </h3>
         <div className="space-y-8">
           <SonicSlider
@@ -47,9 +48,8 @@ export function FilterSidebar({ filters, onChange }: FilterSidebarProps) {
       </div>
 
       <div>
-        <h3 className="font-headline text-xs font-bold tracking-[0.15em] uppercase text-on-surface-variant mb-6 flex items-center gap-2">
-          <span className="w-1 h-4 rounded-full bg-secondary" />
-          Mood Palettes
+        <h3 className="font-headline text-lg font-bold mb-6 text-on-surface">
+          Vibe Anchors
         </h3>
         <div className="flex flex-wrap gap-2">
           {MOOD_OPTIONS.map((mood) => (

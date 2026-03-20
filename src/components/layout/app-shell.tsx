@@ -57,7 +57,7 @@ export function AppShell({
       <AuroraBackground />
       <Sidebar />
       <TopNav />
-      <main className="md:ml-64 pt-20 pb-28 min-h-screen px-6 md:px-10 relative">
+      <main className="md:ml-24 pt-20 pb-28 min-h-screen px-6 md:px-10 relative">
         {children}
       </main>
       <PreviewPlayer />

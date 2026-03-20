@@ -15,7 +15,7 @@ export function BottomBar({ showExport = false, onExport }: BottomBarProps) {
   const count = trackCount();
 
   return (
-    <footer className="fixed bottom-0 right-0 w-full md:w-[calc(100%-16rem)] h-20 z-50 bg-[#131315]/80 backdrop-blur-3xl border-t border-white/5 flex items-center justify-between px-6 md:px-12 font-headline font-semibold">
+    <footer className="fixed bottom-0 right-0 w-full md:w-[calc(100%-6rem)] h-20 z-50 bg-[#131315]/80 backdrop-blur-3xl border-t border-white/5 flex items-center justify-between px-6 md:px-12 font-headline font-semibold">
       {/* Draft info */}
       <div className="flex items-center gap-4 min-w-[180px]">
         {count > 0 ? (

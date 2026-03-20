@@ -36,6 +36,7 @@ yarn-error.log*
 
 # Stitch design assets (reference only, not part of the app)
 /screens/
+/stitch_export/
 product_requirements_document.md
 ui_code.html
 

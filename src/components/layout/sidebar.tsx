@@ -7,8 +7,8 @@ import { Icon } from "@/components/ui/icon";
 import { useAuthStore } from "@/stores/auth-store";
 
 const navItems = [
+  { href: "/", icon: "home", label: "Home" },
   { href: "/library", icon: "library_music", label: "Library" },
-  { href: "/", icon: "explore", label: "Discover" },
   { href: "/generator", icon: "auto_awesome", label: "Generator" },
 ];
 
@@ -22,21 +22,18 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="h-screen w-64 fixed left-0 top-0 border-r border-white/5 bg-[#131315]/60 backdrop-blur-xl shadow-2xl shadow-black/50 flex flex-col py-8 px-4 z-50 font-headline tracking-tight hidden md:flex">
+    <aside className="h-screen w-24 fixed left-0 top-0 bg-[#131315] flex flex-col items-center py-8 z-50 hidden md:flex">
       {/* Logo */}
-      <div className="mb-12 px-4">
-        <Link href="/" className="group">
-          <h1 className="text-2xl font-bold tracking-tighter text-primary group-hover:text-primary-fixed transition-colors duration-200">
-            Sonic Atmosphere
-          </h1>
-          <p className="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant/60 font-medium mt-1">
-            Premium Experience
-          </p>
+      <div className="mb-12">
+        <Link href="/">
+          <span className="text-primary font-black text-2xl tracking-tighter font-headline">
+            S
+          </span>
         </Link>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1">
+      <nav className="flex flex-col gap-6 flex-1">
         {navItems.map((item) => {
           const active = isActive(item.href);
           return (
@@ -44,58 +41,42 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 active:scale-95",
+                "flex flex-col items-center justify-center p-3 rounded-2xl transition-all duration-200 active:scale-90 w-16",
                 active
-                  ? "text-primary font-bold bg-primary/10 shadow-sm"
-                  : "text-on-surface-variant hover:text-white hover:bg-white/5"
+                  ? "bg-primary/10 text-primary"
+                  : "text-on-surface-variant/50 hover:text-primary hover:bg-white/5"
               )}
             >
               <Icon name={item.icon} filled={active} />
-              <span>{item.label}</span>
-              {active && (
-                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
-              )}
+              <span className="text-[10px] font-bold mt-1 font-headline tracking-tight">
+                {item.label}
+              </span>
             </Link>
           );
         })}
       </nav>
 
       {/* Bottom section */}
-      <div className="mt-auto px-2">
-        {isConnected ? (
-          <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/5">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-secondary overflow-hidden flex items-center justify-center shrink-0">
-              {user?.images?.[0]?.url ? (
-                <img
-                  src={user.images[0].url}
-                  alt={user.display_name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <Icon name="person" className="text-on-primary" />
-              )}
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold truncate">
-                {user?.display_name || "Connected"}
-              </span>
-              <span className="text-[10px] text-primary flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block" />
-                Spotify Connected
-              </span>
-            </div>
+      <div className="mt-auto flex flex-col items-center gap-4">
+        {isConnected && user?.images?.[0]?.url ? (
+          <div className="w-10 h-10 rounded-full overflow-hidden border border-outline-variant/20">
+            <img
+              src={user.images[0].url}
+              alt={user.display_name}
+              className="w-full h-full object-cover"
+            />
           </div>
         ) : (
-          <a href="/api/auth/spotify">
-            <button
-              type="button"
-              className="w-full py-3 bg-primary text-on-primary font-bold rounded-full active:scale-95 hover:shadow-lg hover:shadow-primary/20 transition-all duration-200 flex items-center justify-center gap-2"
-            >
-              <Icon name="link" size="sm" />
-              Connect Spotify
-            </button>
-          </a>
+          <Link
+            href="/api/auth/spotify"
+            className="flex flex-col items-center text-on-surface-variant/50 hover:text-primary transition-colors duration-200"
+          >
+            <Icon name="account_circle" />
+          </Link>
         )}
+        <button className="flex flex-col items-center text-on-surface-variant/50 hover:text-primary transition-colors duration-200 p-2">
+          <Icon name="settings" />
+        </button>
       </div>
     </aside>
   );
