@@ -1,6 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { searchTracks } from "@/lib/spotify";
-import { generateRecommendations } from "@/lib/recommendations";
+import { generateRecommendations, songRecommendations } from "@/lib/recommendations";
 import { type FilterValues, type GeneratorMode } from "@/types";
 
 import { getDb } from "@/db";
@@ -65,6 +65,14 @@ export async function GET(request: NextRequest) {
         { error: "Not authenticated. Connect Spotify to search." },
         { status: 401 }
       );
+    }
+
+    // Song mode's similarity logic only needs endpoints client-credentials
+    // tokens can reach — use it even without a connected Spotify account.
+    if (type === "song") {
+      const tracks = await songRecommendations(clientToken, query, filters);
+      logGenerationRun({ ...runContext, source: "client-credentials", resultCount: tracks.length });
+      return NextResponse.json({ tracks });
     }
 
     // Build a smarter search query from prompt + moods

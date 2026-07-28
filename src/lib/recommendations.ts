@@ -1,3 +1,5 @@
+import Anthropic from "@anthropic-ai/sdk";
+
 import {
   searchTracks,
   searchArtists,
@@ -231,7 +233,7 @@ function filterConstraints(params: Partial<RecommendationParams>): Partial<Recom
   return constraints;
 }
 
-async function songRecommendations(
+export async function songRecommendations(
   accessToken: string,
   prompt: string,
   filters: FilterValues
@@ -241,13 +243,14 @@ async function songRecommendations(
   // Search for the seed song
   const seedResults = await searchTracks(prompt, accessToken, 3);
   if (seedResults.length === 0) return [];
+  const seed = seedResults[0];
 
   const seedTrackIds = seedResults.map((t) => t.id).slice(0, 2);
   const seedArtistIds = seedResults
     .flatMap((t) => t.artists.map((a) => a.id))
     .slice(0, 3);
 
-  // Get recommendations based on seed tracks with mixed seeds
+  // Native recommendations first — best quality where the app still has access
   const tracks = await getRecommendations(accessToken, {
     seed_tracks: seedTrackIds.join(","),
     seed_artists: seedArtistIds.slice(0, 5 - seedTrackIds.length).join(","),
@@ -260,8 +263,110 @@ async function songRecommendations(
     ...filterConstraints(audioParams),
     limit: 20,
   });
+  if (tracks.length > 0) return tracks;
 
-  return tracks;
+  // The /recommendations endpoint is restricted for newer Spotify apps.
+  // Rebuild "similar vibes" from endpoints that still work: the seed
+  // artist's top tracks + genre searches, ranked by similarity to the seed.
+  return similarBySeedTrack(accessToken, seed);
+}
+
+// This Spotify app tier gets 403s from /recommendations, /audio-features,
+// top-tracks, and playlist items, and artist objects carry no genres — the
+// only reliable tool is search. So: Claude proposes the musical neighborhood
+// (similar artists + genre terms), and Spotify search resolves real tracks.
+async function similarBySeedTrack(
+  accessToken: string,
+  seed: SpotifyTrack
+): Promise<SpotifyTrack[]> {
+  const neighborhood = await expandNeighborhood(seed);
+  const clean = (s: string) => s.replace(/"/g, "").trim();
+
+  const artistQueries = [
+    ...(neighborhood?.artists ?? []),
+    ...seed.artists.map((a) => a.name),
+  ]
+    .map(clean)
+    .filter(Boolean)
+    .slice(0, 10);
+  const genreQueries = (neighborhood?.genres ?? []).map(clean).filter(Boolean);
+
+  const results = await Promise.all([
+    ...artistQueries.map((name) => searchTracks(`artist:"${name}"`, accessToken, 4)),
+    ...genreQueries.map((g) => searchTracks(`genre:"${g}"`, accessToken, 8)),
+  ]);
+
+  // Dedupe, then prefer tracks whose popularity sits near the seed's, capped
+  // at 2 per artist so one act doesn't flood the playlist.
+  const seen = new Set<string>([seed.id]);
+  const unique = results
+    .flat()
+    .filter((t) => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        Math.abs(a.popularity - seed.popularity) - Math.abs(b.popularity - seed.popularity)
+    );
+
+  const perArtist = new Map<string, number>();
+  const candidates: SpotifyTrack[] = [];
+  for (const t of unique) {
+    const key = t.artists[0]?.id ?? t.id;
+    const count = perArtist.get(key) ?? 0;
+    if (count >= 2) continue;
+    perArtist.set(key, count + 1);
+    candidates.push(t);
+  }
+
+  // Lead with the liked song itself so the playlist starts from it.
+  return [seed, ...candidates].slice(0, 21);
+}
+
+interface SongNeighborhood {
+  artists: string[];
+  genres: string[];
+}
+
+async function expandNeighborhood(seed: SpotifyTrack): Promise<SongNeighborhood | null> {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const artistNames = seed.artists.map((a) => a.name).join(", ");
+    const response = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 300,
+      messages: [
+        {
+          role: "user",
+          content: `Consider the song "${seed.name}" by ${artistNames}. I want to find more music with the same vibe.
+
+Respond ONLY with valid JSON in this exact format, no other text:
+{"artists": ["...8 similar-sounding artists, not ${artistNames}..."], "genres": ["...3 short genre terms as used on Spotify, e.g. dream pop, indie folk..."]}`,
+        },
+      ],
+    });
+    const textBlock = response.content.find((c) => c.type === "text");
+    if (!textBlock || textBlock.type !== "text") return null;
+    let jsonStr = textBlock.text.trim();
+    if (jsonStr.startsWith("```")) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    }
+    const parsed = JSON.parse(jsonStr);
+    return {
+      artists: Array.isArray(parsed.artists)
+        ? parsed.artists.filter((a: unknown): a is string => typeof a === "string").slice(0, 8)
+        : [],
+      genres: Array.isArray(parsed.genres)
+        ? parsed.genres.filter((g: unknown): g is string => typeof g === "string").slice(0, 3)
+        : [],
+    };
+  } catch (err) {
+    console.error("[song-mode] neighborhood expansion failed:", err);
+    return null;
+  }
 }
 
 async function artistRecommendations(

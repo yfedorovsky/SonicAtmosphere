@@ -214,7 +214,8 @@ export async function getArtistTopTracks(
   artistId: string,
   accessToken: string
 ): Promise<SpotifyTrack[]> {
-  const res = await spotifyFetch(`/artists/${artistId}/top-tracks`, accessToken);
+  // market is required for client-credentials tokens (no user country to infer)
+  const res = await spotifyFetch(`/artists/${artistId}/top-tracks?market=US`, accessToken);
   if (!res.ok) return [];
 
   const data = await res.json();
