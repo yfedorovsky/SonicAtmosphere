@@ -6,7 +6,7 @@ AI-assisted playlist curation. Describe a vibe, seed it with a song you love, or
 
 ## Features
 
-- **Generator** — four modes: *Vibe* (free-text prompt + mood anchors + Sonic DNA sliders), *Song* (AI-powered similar-vibes radio from one seed track), *Artist*, and *Genre*. Filter changes surface an explicit **Update results** button rather than burning API calls on every toggle.
+- **Generator** — four modes, all powered by a grounded AI similarity engine (Claude proposes the musical neighborhood from real Spotify signals; search resolves it): *Vibe* (free-text description — references to songs/artists become anchors, sensory language reads as mood), *Song* (similar-vibes radio from one seed track), *Artist* (artist radio), and *Genre* (canon + current acts). Filter changes surface an explicit **Update results** button rather than burning API calls on every toggle.
 - **Builder (the editing loop)** — drag-to-reorder, undo/redo, 30-second previews, and:
   - **Lock track** — freeze keepers; locked tracks can't be removed and always survive replacements and refreshes.
   - **Replace weakest N** — swap the worst-fitting unlocked tracks for fresh suggestions, with modifiers (*less mainstream, more energy, calmer, more acoustic*). One undo step.
@@ -92,7 +92,9 @@ Notes for other hosts: the app is a standard Next.js 16 app — anything that ru
 
 ## Spotify API constraints (important)
 
-Newer Spotify apps are heavily restricted. Confirmed against this app tier: `/recommendations`, `/audio-features`, `/artists/{id}/top-tracks`, and `/playlists/{id}/tracks` all return **403**, and artist objects carry **no genres**. The app is built around what still works — track/artist/playlist **search** (including `artist:` and `genre:` field filters) — with Claude filling the similarity gap (Song mode, rationale). Details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Newer Spotify apps are heavily restricted. Confirmed against this app tier: `/recommendations`, `/audio-features`, `/artists/{id}/top-tracks`, and `/playlists/{id}/tracks` all return **403**, and artist objects carry **no genres**. The app is built around what still works — track/artist/playlist **search** (including `artist:` and `genre:` field filters) — with Claude filling the similarity gap across **all four generator modes** plus auto-titling and per-track rationale. Details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+Policy notes (as of Feb 2026): Development Mode is explicitly non-commercial, capped at 5 authorized users, and requires a Premium account; commercial use requires extended-quota approval, which Spotify only grants to legally registered organizations. Non-streaming apps (like this one — it never touches playback-control endpoints) may charge subscriptions once approved; streaming apps may not.
 
 ## Development
 

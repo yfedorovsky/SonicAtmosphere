@@ -41,13 +41,17 @@ How Sonic Atmosphere is put together: identity, data model, the generation pipel
 
 `GET /api/spotify/search` → `src/lib/recommendations.ts`
 
-Token resolution first: connected user token (DB, auto-refresh) → else app-only client-credentials token (cached in-process with explicit expiry — Next's fetch cache serves stale entries while revalidating, which handed out expired tokens).
+Token resolution first: connected user token (DB, auto-refresh) → else app-only client-credentials token (cached in-process with explicit expiry — Next's fetch cache serves stale entries while revalidating, which handed out expired tokens). **Every mode works with the app-only token**; generation quality does not depend on a Spotify login.
 
-Per mode:
+**All four modes run one grounded LLM→search pipeline** (`askNeighborhood` + `resolveAndRank`). Each mode first attempts the native `/recommendations` path (works only for grandfathered apps; typically 403), then:
 
-- **Vibe** — with a user token: seed-mixed `/recommendations` call built from prompt-extracted genres, artist hints ("like X"), audio-parameter keywords, and negative prompting ("no acoustic"), falling back to keyword search. Without: `keywordVibeSearch` — several varied keyword searches (stop-word-stripped prompt, mood→term expansions) merged and deduped.
-- **Song (similar vibes)** — try native `/recommendations`; on the (typical) 403, `similarBySeedTrack`: **Claude Haiku names 8 similar artists + 3 genre terms** for the seed, Spotify search resolves them via `artist:"…"` / `genre:"…"` field filters, results are deduped, capped at 2 tracks/artist, ranked by popularity proximity to the seed, and led by the seed itself.
-- **Artist / Genre** — native endpoints where available, search fallbacks otherwise.
+1. **Grounding** — gather signals this app tier can still read: the relevant artist's own catalog (`artist:"…"` search) and the *names* of public playlists matching the song/artist/vibe (playlist metadata is searchable even though playlist items are 403). These describe the actual style so the model never guesses blind.
+2. **Neighborhood** — one `claude-opus-5` JSON call proposes up to 8 real artists + 3 Spotify genre terms (+ optional keyword phrases for vibe mode), instructed to anchor on any referenced song/artist, infer unknown artists strictly from the grounding clues, and read sensory language ("coffee aroma") as mood, never literally. Refusals and failures degrade gracefully to catalog/keyword fallbacks.
+3. **Resolution & hygiene** (`resolveAndRank`) — Spotify search resolves the neighborhood with strict filters: artist-search results must have the queried artist as the **primary** artist (kills fuzzy matches and featured-credit pollution); dedupe by id *and* normalized artist+title (re-releases carry different ids); tracks under 61s dropped (skits/interludes); genre/keyword results ride a lower tier capped at a few slots; a per-credited-artist cap of 2 stops floods; results sort by tier then popularity-proximity to an anchor (the seed track's popularity, or the UI's popularity slider — making that slider meaningful).
+
+Per mode: **Song** leads with the seed itself (seed resolution prefers the most popular of the top text matches — cover-farm defense); **Vibe** is grounded by playlist names matching the vibe keywords; **Artist** is a grounded artist radio (own catalog at tier 0 + similar artists); **Genre** has Claude name the genre's canon and blends it with `genre:"…"` field search.
+
+Quality was validated by an adversarial judge panel across five genres (psych-funk, IDM, americana, hip-hop, classical) and cross-checked against last.fm similar-artist data. Cost: one Opus call per generation (fraction of a cent), bounded by the search rate limits.
 
 Every generator call logs a `generation_runs` row (fire-and-forget via `next/server after()`); import matching (`type=track`) is exempt so pasted lists don't pollute prompt history.
 
