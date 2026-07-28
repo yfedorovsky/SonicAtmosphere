@@ -1,36 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sonic Atmosphere
 
-## Getting Started
+AI-assisted playlist curation. Describe a vibe, seed it with a song you love, or import a track list — then shape the result with a real editing loop: lock the keepers, replace the weak spots, and let the playlist refresh itself on a schedule. Export to Spotify when it's right.
 
-First, run the development server:
+**Core thesis:** get from a rough playlist idea to a finished, editable, savable playlist faster than Spotify does.
+
+## Features
+
+- **Generator** — four modes: *Vibe* (free-text prompt + mood anchors + Sonic DNA sliders), *Song* (AI-powered similar-vibes radio from one seed track), *Artist*, and *Genre*. Filter changes surface an explicit **Update results** button rather than burning API calls on every toggle.
+- **Builder (the editing loop)** — drag-to-reorder, undo/redo, 30-second previews, and:
+  - **Lock track** — freeze keepers; locked tracks can't be removed and always survive replacements and refreshes.
+  - **Replace weakest N** — swap the worst-fitting unlocked tracks for fresh suggestions, with modifiers (*less mainstream, more energy, calmer, more acoustic*). One undo step.
+  - **Explain picks** — a short AI "why this track is here" note under each track.
+  - **Auto-title** — AI playlist titles and description.
+- **Living playlists** — per-draft refresh rules: daily/weekly cadence, keep-percent (e.g. keep 60%, rotate 40%), avoid-artist-repeats. Runs on a platform cron; manual **Refresh now** any time.
+- **Templates** — save a draft's recipe (prompt/mode/filters) and generate fresh drafts from it in one click.
+- **Import** — paste or upload a track list; lines are matched against Spotify search.
+- **Persistence** — anonymous-first accounts (no signup): drafts, prompt history, generation runs, and analytics survive reloads and follow your Spotify identity across devices once connected.
+- **Export** — creates a private Spotify playlist (requires connecting Spotify).
+
+## Quick start
+
+Prerequisites: Node.js ≥ 20.9, a [Spotify developer app](https://developer.spotify.com/dashboard), an [Anthropic API key](https://console.anthropic.com/).
 
 ```bash
+git clone https://github.com/yfedorovsky/SonicAtmosphere.git
+cd SonicAtmosphere
+npm install
+cp .env.example .env   # then fill it in (see below)
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://127.0.0.1:3000. **No database setup is needed for local dev** — an embedded Postgres ([PGlite](https://pglite.dev/)) is created in `.pglite/` automatically and migrations run on first connection.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+In the Spotify app dashboard, add this redirect URI: `http://127.0.0.1:3000/api/auth/spotify/callback`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Environment variables
 
-## Learn More
+| Variable | Required | Purpose |
+|---|---|---|
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | yes | Spotify app credentials (search, OAuth, export) |
+| `ANTHROPIC_API_KEY` | yes | Auto-titling, per-track rationale, Song-mode similarity |
+| `SESSION_SECRET` | yes | Signs the anonymous session cookie and encrypts Spotify tokens at rest (`openssl rand -base64 32`) |
+| `NEXT_PUBLIC_APP_URL` | yes | Public origin, used for the OAuth redirect (local: `http://127.0.0.1:3000`) |
+| `DATABASE_URL` | prod only | Postgres connection string. Unset locally → embedded PGlite |
+| `CRON_SECRET` | prod only | Protects `/api/cron/refresh`; Vercel sends it automatically for cron invocations |
 
-To learn more about Next.js, take a look at the following resources:
+## Database
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Drizzle ORM over Postgres. Schema lives in [`src/db/schema.ts`](src/db/schema.ts); SQL migrations in [`drizzle/`](drizzle/) are applied automatically at first connection (dev and prod).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+After changing the schema:
 
-## Deploy on Vercel
+```bash
+npx drizzle-kit generate --name my_change
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Commit the generated files under `drizzle/`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## API surface
+
+All routes are session-scoped (signed anonymous cookie) and rate-limited. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
+
+| Route | Purpose |
+|---|---|
+| `GET/POST /api/drafts`, `GET/PUT/DELETE /api/drafts/[id]` | Draft CRUD (full-replace upsert) |
+| `GET/PUT/DELETE /api/drafts/[id]/refresh-rule` | Living-playlist schedule for a draft |
+| `POST /api/drafts/[id]/refresh` | Manual refresh now |
+| `GET/POST /api/templates`, `GET/DELETE /api/templates/[id]` | Saved generation recipes |
+| `GET /api/spotify/search` | Generation endpoint (all modes) + import matching |
+| `POST /api/spotify/playlist` | Export to Spotify |
+| `POST /api/generate-meta` | AI titles + description |
+| `POST /api/rationale` | AI per-track "why this track is here" |
+| `GET /api/prompts/recent` | Prompt history (derived from generation runs) |
+| `POST /api/events` | Client analytics events |
+| `GET /api/auth/spotify` → `/callback`, `GET /api/auth/status` | Spotify OAuth |
+| `GET /api/cron/refresh` | Scheduled refresh runner (Bearer `CRON_SECRET`) |
+
+## Deployment (Vercel)
+
+1. **Database** — provision any Postgres (Neon, Vercel Postgres, Supabase, RDS). Copy the connection string.
+2. **Import the repo** into Vercel (or `npx vercel` from the repo root).
+3. **Environment variables** — set all of the table above in the Vercel project, with:
+   - `DATABASE_URL` = your Postgres connection string
+   - `NEXT_PUBLIC_APP_URL` = `https://your-domain.vercel.app` (no trailing slash)
+   - fresh values for `SESSION_SECRET` and `CRON_SECRET`
+4. **Spotify redirect URI** — add `https://your-domain.vercel.app/api/auth/spotify/callback` in the Spotify developer dashboard.
+5. **Cron** — [`vercel.json`](vercel.json) already schedules `/api/cron/refresh` daily at 06:00 UTC; Vercel authenticates it with `CRON_SECRET` automatically.
+6. Deploy. Migrations run automatically on the first request.
+
+Notes for other hosts: the app is a standard Next.js 16 app — anything that runs it works. You'll need to trigger `GET /api/cron/refresh` with `Authorization: Bearer $CRON_SECRET` on your own schedule, and note the in-memory rate limiter is per-instance (front it with a shared limiter if you scale horizontally).
+
+## Spotify API constraints (important)
+
+Newer Spotify apps are heavily restricted. Confirmed against this app tier: `/recommendations`, `/audio-features`, `/artists/{id}/top-tracks`, and `/playlists/{id}/tracks` all return **403**, and artist objects carry **no genres**. The app is built around what still works — track/artist/playlist **search** (including `artist:` and `genre:` field filters) — with Claude filling the similarity gap (Song mode, rationale). Details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Development
+
+```bash
+npm run dev     # dev server (embedded Postgres, auto-migrations)
+npm run build   # production build + typecheck
+npm run lint    # eslint
+```
+
+The stack: Next.js 16 (App Router, route handlers), React 19, Tailwind 4, Zustand + zundo (client state + undo), Drizzle ORM, PGlite/postgres-js, Anthropic SDK (Claude Haiku for all AI features).

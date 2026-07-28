@@ -23,6 +23,12 @@ async function createDb(): Promise<Db> {
     return db;
   }
 
+  // Serverless filesystems are read-only — an embedded DB there would fail
+  // at runtime with a confusing error, so fail loudly and early instead.
+  if (process.env.NODE_ENV === "production" && process.env.VERCEL) {
+    throw new Error("DATABASE_URL is required in production (set it to a Postgres connection string)");
+  }
+
   // No DATABASE_URL: embedded Postgres (PGlite) persisted to .pglite/ —
   // zero-setup local dev, same SQL dialect as production.
   const { PGlite } = await import("@electric-sql/pglite");
