@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   searchTracks,
   searchArtists,
+  searchPlaylistNames,
   getRecommendations,
   getArtistTopTracks,
   getRelatedArtists,
@@ -336,10 +337,11 @@ export async function songRecommendations(
 ): Promise<SpotifyTrack[]> {
   const audioParams = extractAudioParams(prompt);
 
-  // Search for the seed song
+  // Search for the seed song. Among the top text matches, prefer the most
+  // popular — canonical recordings beat cover-farm uploads of the same title.
   const seedResults = await searchTracks(prompt, accessToken, 3);
   if (seedResults.length === 0) return [];
-  const seed = seedResults[0];
+  const seed = [...seedResults].sort((a, b) => b.popularity - a.popularity)[0];
 
   const seedTrackIds = seedResults.map((t) => t.id).slice(0, 2);
   const seedArtistIds = seedResults
@@ -370,50 +372,90 @@ export async function songRecommendations(
 // This Spotify app tier gets 403s from /recommendations, /audio-features,
 // top-tracks, and playlist items, and artist objects carry no genres — the
 // only reliable tool is search. So: Claude proposes the musical neighborhood
-// (similar artists + genre terms), and Spotify search resolves real tracks.
+// (similar artists + genre terms) grounded in real catalog/playlist signals,
+// and Spotify search resolves real tracks.
 async function similarBySeedTrack(
   accessToken: string,
   seed: SpotifyTrack
 ): Promise<SpotifyTrack[]> {
-  const neighborhood = await expandNeighborhood(seed);
   const clean = (s: string) => s.replace(/"/g, "").trim();
+  const primaryArtist = clean(seed.artists[0]?.name ?? "");
 
-  const artistQueries = [
-    ...(neighborhood?.artists ?? []),
-    ...seed.artists.map((a) => a.name),
-  ]
-    .map(clean)
-    .filter(Boolean)
-    .slice(0, 10);
-  const genreQueries = (neighborhood?.genres ?? []).map(clean).filter(Boolean);
-
-  const results = await Promise.all([
-    ...artistQueries.map((name) => searchTracks(`artist:"${name}"`, accessToken, 4)),
-    ...genreQueries.map((g) => searchTracks(`genre:"${g}"`, accessToken, 8)),
+  // Grounding signals: the artist's own catalog and the names of playlists
+  // featuring the song describe its actual style — so the LLM isn't guessing
+  // blind on artists it doesn't know.
+  const [artistTracks, playlistMeta] = await Promise.all([
+    primaryArtist
+      ? searchTracks(`artist:"${primaryArtist}"`, accessToken, 10)
+      : Promise.resolve([]),
+    searchPlaylistNames(`${seed.name} ${primaryArtist}`, accessToken, 8),
   ]);
 
-  // Dedupe, then prefer tracks whose popularity sits near the seed's, capped
-  // at 2 per artist so one act doesn't flood the playlist.
-  const seen = new Set<string>([seed.id]);
-  const unique = results
-    .flat()
-    .filter((t) => {
-      if (seen.has(t.id)) return false;
-      seen.add(t.id);
-      return true;
-    })
-    .sort(
-      (a, b) =>
-        Math.abs(a.popularity - seed.popularity) - Math.abs(b.popularity - seed.popularity)
-    );
+  const neighborhood = await expandNeighborhood(seed, artistTracks, playlistMeta);
 
+  const artistQueries = (neighborhood?.artists ?? []).map(clean).filter(Boolean).slice(0, 8);
+  const genreQueries = (neighborhood?.genres ?? []).map(clean).filter(Boolean).slice(0, 3);
+
+  // Spotify's artist: filter fuzzy-matches (querying "L'Eclair" also returns
+  // the composer "Leclair") and matches featured credits (querying "Ludacris"
+  // returns Justin Bieber's "Baby") — keep only tracks where the named artist
+  // is the PRIMARY artist.
+  const normalize = (s: string) =>
+    s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
+  const [artistResults, genreResults] = await Promise.all([
+    Promise.all(
+      artistQueries.map(async (name) => {
+        const tracks = await searchTracks(`artist:"${name}"`, accessToken, 10);
+        return tracks.filter((t) => normalize(t.artists[0]?.name ?? "") === normalize(name));
+      })
+    ),
+    Promise.all(genreQueries.map((g) => searchTracks(`genre:"${g}"`, accessToken, 8))),
+  ]);
+
+  // Tiered ranking: the seed artist's own tracks and named similar artists
+  // are safer bets than generic genre-search hits; within a tier, prefer
+  // popularity near the seed's. Cap 2 per artist so no act floods the list.
+  const tiers: [SpotifyTrack[], number][] = [
+    [artistTracks, 0],
+    [artistResults.flat(), 0],
+    [genreResults.flat(), 1],
+  ];
+  // Dedupe by id AND by normalized artist|title — the same song re-released
+  // on another album carries a different Spotify id.
+  const songKey = (t: SpotifyTrack) =>
+    `${normalize(t.artists[0]?.name ?? "")}|${normalize(
+      t.name.replace(/\s*[([].*?[)\]]\s*/g, " ").split(" - ")[0]
+    )}`;
+  const seen = new Set<string>([seed.id]);
+  const seenSongs = new Set<string>([songKey(seed)]);
+  const unique: { t: SpotifyTrack; tier: number }[] = [];
+  for (const [tracks, tier] of tiers) {
+    for (const t of tracks) {
+      if (seen.has(t.id) || seenSongs.has(songKey(t))) continue;
+      // Skits, interludes, and interstitial fragments are never on-vibe.
+      if (t.duration_ms > 0 && t.duration_ms < 61_000) continue;
+      seen.add(t.id);
+      seenSongs.add(songKey(t));
+      unique.push({ t, tier });
+    }
+  }
+  unique.sort(
+    (a, b) =>
+      a.tier - b.tier ||
+      Math.abs(a.t.popularity - seed.popularity) - Math.abs(b.t.popularity - seed.popularity)
+  );
+
+  // Count every credited artist so features can't flood the list either, and
+  // cap generic genre-search hits — broad genre tags pull in pop filler.
   const perArtist = new Map<string, number>();
   const candidates: SpotifyTrack[] = [];
-  for (const t of unique) {
-    const key = t.artists[0]?.id ?? t.id;
-    const count = perArtist.get(key) ?? 0;
-    if (count >= 2) continue;
-    perArtist.set(key, count + 1);
+  let genreSlots = 0;
+  for (const { t, tier } of unique) {
+    if (tier === 1 && genreSlots >= 4) continue;
+    const keys = t.artists.length > 0 ? t.artists.map((a) => a.id) : [t.id];
+    if (keys.some((k) => (perArtist.get(k) ?? 0) >= 2)) continue;
+    for (const k of keys) perArtist.set(k, (perArtist.get(k) ?? 0) + 1);
+    if (tier === 1) genreSlots += 1;
     candidates.push(t);
   }
 
@@ -426,24 +468,55 @@ interface SongNeighborhood {
   genres: string[];
 }
 
-async function expandNeighborhood(seed: SpotifyTrack): Promise<SongNeighborhood | null> {
+async function expandNeighborhood(
+  seed: SpotifyTrack,
+  artistTracks: SpotifyTrack[],
+  playlistMeta: { name: string; description: string }[]
+): Promise<SongNeighborhood | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   try {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const artistNames = seed.artists.map((a) => a.name).join(", ");
+
+    const otherTitles = artistTracks
+      .filter((t) => t.id !== seed.id)
+      .map((t) => t.name)
+      .slice(0, 8);
+    const playlistNames = playlistMeta
+      .map((p) => (p.description ? `${p.name} (${p.description})` : p.name))
+      .slice(0, 8);
+
+    const clues = [
+      otherTitles.length ? `- Other tracks by this artist: ${otherTitles.join("; ")}` : "",
+      playlistNames.length
+        ? `- Public playlists featuring this song: ${playlistNames.join("; ")}`
+        : "",
+      seed.album.name ? `- Album: "${seed.album.name}"` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
     const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 300,
+      // Opus-tier knowledge matters here: obscure artists misidentified by a
+      // smaller model produce a completely wrong playlist.
+      model: "claude-opus-5",
+      max_tokens: 2000,
       messages: [
         {
           role: "user",
-          content: `Consider the song "${seed.name}" by ${artistNames}. I want to find more music with the same vibe.
+          content: `I want to find more music with the same vibe as the song "${seed.name}" by ${artistNames}.
+
+Context clues about this song's actual style, gathered from Spotify:
+${clues || "- (none available)"}
+
+If you know this artist, use your knowledge of their sound. If you do NOT recognize them, derive the style strictly from the context clues above — never fall back to generic popular artists.
 
 Respond ONLY with valid JSON in this exact format, no other text:
-{"artists": ["...8 similar-sounding artists, not ${artistNames}..."], "genres": ["...3 short genre terms as used on Spotify, e.g. dream pop, indie folk..."]}`,
+{"artists": ["...8 similar-sounding artists, not ${artistNames}..."], "genres": ["...3 short genre terms as used on Spotify, e.g. dream pop, psychedelic funk..."]}`,
         },
       ],
     });
+    if (response.stop_reason === "refusal") return null;
     const textBlock = response.content.find((c) => c.type === "text");
     if (!textBlock || textBlock.type !== "text") return null;
     let jsonStr = textBlock.text.trim();

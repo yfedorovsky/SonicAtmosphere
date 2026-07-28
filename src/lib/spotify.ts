@@ -279,6 +279,31 @@ export async function createPlaylist(
   };
 }
 
+// Playlist ITEMS are 403 for this app tier, but playlist search metadata is
+// readable — the names of playlists containing a song are a strong signal of
+// its actual style ("Songs Like X", "turkish psych funk", ...).
+export async function searchPlaylistNames(
+  query: string,
+  accessToken: string,
+  limit = 8
+): Promise<{ name: string; description: string }[]> {
+  const params = new URLSearchParams({
+    q: query,
+    type: "playlist",
+    limit: String(Math.min(limit, 10)),
+  });
+  const res = await spotifyFetch(`/search?${params}`, accessToken);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.playlists?.items || [])
+    .filter(Boolean)
+    .map((p: { name?: string; description?: string }) => ({
+      name: p.name || "",
+      description: p.description || "",
+    }))
+    .filter((p: { name: string }) => p.name);
+}
+
 // App-only token for search when no user is connected. Cached in-process
 // with an explicit expiry — Next's fetch cache serves stale entries while
 // revalidating, which hands out expired tokens after a restart.
