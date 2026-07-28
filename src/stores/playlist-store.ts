@@ -35,6 +35,8 @@ interface PlaylistActions {
     filters?: FilterValues;
   }) => void;
   setExportedUrl: (url: string) => void;
+  toggleTrackLock: (trackId: string) => void;
+  isTrackLocked: (trackId: string) => boolean;
   addTrack: (track: SpotifyTrack) => boolean;
   removeTrack: (trackId: string) => void;
   reorderTracks: (startIndex: number, endIndex: number) => void;
@@ -102,6 +104,25 @@ export const usePlaylistStore = create<PlaylistStore>()(
         }));
       },
 
+      toggleTrackLock: (trackId) => {
+        set((state) => {
+          const locked = state.currentDraft.lockedTrackIds ?? [];
+          const lockedTrackIds = locked.includes(trackId)
+            ? locked.filter((id) => id !== trackId)
+            : [...locked, trackId];
+          return {
+            currentDraft: {
+              ...state.currentDraft,
+              lockedTrackIds,
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        });
+      },
+
+      isTrackLocked: (trackId) =>
+        (get().currentDraft.lockedTrackIds ?? []).includes(trackId),
+
       addTrack: (track) => {
         const { currentDraft } = get();
         if (currentDraft.tracks.some((t) => t.id === track.id)) return false;
@@ -120,6 +141,8 @@ export const usePlaylistStore = create<PlaylistStore>()(
           currentDraft: {
             ...state.currentDraft,
             tracks: state.currentDraft.tracks.filter((t) => t.id !== trackId),
+            // A removed track must not linger in the lock list.
+            lockedTrackIds: state.currentDraft.lockedTrackIds?.filter((id) => id !== trackId),
             updatedAt: new Date().toISOString(),
           },
         }));

@@ -15,6 +15,13 @@
       "when": 1785200610832,
       "tag": "0001_draft_tracks_unique_position",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785201306890,
+      "tag": "0002_locked_track_ids",
+      "breakpoints": true
     }
   ]
 }

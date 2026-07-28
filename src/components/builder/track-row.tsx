@@ -10,13 +10,15 @@ interface TrackRowProps {
   track: SpotifyTrack;
   index: number;
   onRemove: () => void;
+  isLocked?: boolean;
+  onToggleLock?: () => void;
   isOutlier?: boolean;
   driftScore?: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dragHandleProps?: any;
 }
 
-export function TrackRow({ track, index, onRemove, isOutlier, driftScore, dragHandleProps }: TrackRowProps) {
+export function TrackRow({ track, index, onRemove, isLocked, onToggleLock, isOutlier, driftScore, dragHandleProps }: TrackRowProps) {
   const albumArt = track.album.images[track.album.images.length - 1]?.url;
   const { currentTrack, isPlaying, toggle } = usePlaybackStore();
   const isCurrentlyPlaying = currentTrack?.id === track.id && isPlaying;
@@ -24,8 +26,9 @@ export function TrackRow({ track, index, onRemove, isOutlier, driftScore, dragHa
 
   return (
     <div className={cn(
-      "grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 items-center px-6 py-3 rounded-xl transition-all duration-200 group cursor-grab active:cursor-grabbing",
-      isCurrentlyPlaying ? "bg-primary/5" : isOutlier ? "bg-tertiary/5 border border-tertiary/15" : "hover:bg-white/5"
+      "grid grid-cols-[3rem_3fr_2fr_1fr_5rem] gap-4 items-center px-6 py-3 rounded-xl transition-all duration-200 group cursor-grab active:cursor-grabbing",
+      isCurrentlyPlaying ? "bg-primary/5" : isOutlier ? "bg-tertiary/5 border border-tertiary/15" : "hover:bg-white/5",
+      isLocked && "ring-1 ring-secondary/20"
     )}>
       {/* Index / play / drag handle */}
       <div className="text-center" {...dragHandleProps}>
@@ -98,14 +101,38 @@ export function TrackRow({ track, index, onRemove, isOutlier, driftScore, dragHa
         {formatDuration(track.duration_ms)}
       </span>
 
-      {/* Remove button */}
-      <button
-        type="button"
-        onClick={onRemove}
-        className="flex justify-center text-on-surface-variant/40 hover:text-error transition-colors duration-200"
-      >
-        <Icon name="close" size="sm" />
-      </button>
+      {/* Lock + remove buttons */}
+      <div className="flex items-center justify-center gap-1">
+        {onToggleLock && (
+          <button
+            type="button"
+            onClick={onToggleLock}
+            title={isLocked ? "Unlock track" : "Lock track (keep it through replacements)"}
+            className={cn(
+              "transition-colors duration-200",
+              isLocked
+                ? "text-secondary"
+                : "text-on-surface-variant/40 hover:text-secondary opacity-0 group-hover:opacity-100"
+            )}
+          >
+            <Icon name={isLocked ? "lock" : "lock_open"} size="sm" filled={isLocked} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={isLocked}
+          title={isLocked ? "Unlock to remove" : "Remove track"}
+          className={cn(
+            "flex justify-center transition-colors duration-200",
+            isLocked
+              ? "text-on-surface-variant/15 cursor-not-allowed"
+              : "text-on-surface-variant/40 hover:text-error"
+          )}
+        >
+          <Icon name="close" size="sm" />
+        </button>
+      </div>
     </div>
   );
 }

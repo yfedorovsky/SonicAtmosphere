@@ -39,8 +39,10 @@ function GeneratorContent() {
   const addRecentPrompt = useDraftsStore((s) => s.addRecentPrompt);
   const currentDraftId = usePlaylistStore((s) => s.currentDraft.id);
   const setGenerationContext = usePlaylistStore((s) => s.setGenerationContext);
-  const isAutoSelectingRef = useRef(false);
   const runCountRef = useRef(0);
+  // Snapshot of mode+filters at the last generate — filter changes no longer
+  // auto-regenerate; they surface an explicit "Update results" button.
+  const [lastGenerated, setLastGenerated] = useState<string | null>(null);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) return;
@@ -58,9 +60,9 @@ function GeneratorContent() {
     let activeFilters = filters;
     if (filters.moods.length === 0 && suggested.length > 0) {
       activeFilters = { ...filters, moods: suggested };
-      isAutoSelectingRef.current = true;
       setFilters(activeFilters);
     }
+    setLastGenerated(JSON.stringify({ mode, filters: activeFilters }));
 
     // Stamp the working draft with what produced it, so the saved draft can
     // explain and re-run its generation later.
@@ -107,18 +109,11 @@ function GeneratorContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-regenerate when filters change (only if we already have results)
-  useEffect(() => {
-    if (isAutoSelectingRef.current) {
-      isAutoSelectingRef.current = false;
-      return;
-    }
-    if (hasSearched && prompt.trim()) {
-      handleGenerate();
-    }
-    // Only trigger on filter changes, not on every dependency
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters]);
+  const filtersDirty =
+    hasSearched &&
+    !isLoading &&
+    lastGenerated !== null &&
+    lastGenerated !== JSON.stringify({ mode, filters });
 
   function handleModeChange(newMode: GeneratorMode) {
     setMode(newMode);
@@ -199,6 +194,21 @@ function GeneratorContent() {
         </div>
 
         <div className="flex-1 min-w-0">
+          {filtersDirty && (
+            <div className="mb-4 flex items-center justify-between gap-4 bg-surface-container/60 border border-primary/20 rounded-2xl px-5 py-3 animate-fade-in">
+              <p className="text-sm text-on-surface-variant">
+                Filters changed since these results were generated.
+              </p>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-on-primary text-sm font-bold hover:opacity-90 transition-opacity"
+              >
+                <Icon name="refresh" size="sm" />
+                Update results
+              </button>
+            </div>
+          )}
           <TrackResultsList
             tracks={results}
             isLoading={isLoading}

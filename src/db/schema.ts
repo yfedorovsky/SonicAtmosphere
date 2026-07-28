@@ -61,6 +61,7 @@ export const playlistDrafts = pgTable(
     prompt: text("prompt"),
     mode: text("mode").$type<GeneratorMode>(),
     filters: jsonb("filters").$type<FilterValues>(),
+    lockedTrackIds: jsonb("locked_track_ids").$type<string[]>(),
     exportedUrl: text("exported_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

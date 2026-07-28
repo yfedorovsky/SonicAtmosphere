@@ -36,6 +36,9 @@ export interface PlaylistDraft {
   prompt?: string;
   mode?: GeneratorMode;
   filters?: FilterValues;
+  // Locked tracks are "keepers": protected from removal and skipped by
+  // replace operations (Sprint 2 editing loop).
+  lockedTrackIds?: string[];
   createdAt: string;
   updatedAt: string;
   exportedUrl?: string;

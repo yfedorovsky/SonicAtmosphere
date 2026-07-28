@@ -13,9 +13,10 @@ import { useVibeDrift } from "@/hooks/use-vibe-drift";
 import { Icon } from "@/components/ui/icon";
 
 export function TrackTable() {
-  const { currentDraft, removeTrack, reorderTracks } = usePlaylistStore();
+  const { currentDraft, removeTrack, reorderTracks, toggleTrackLock } = usePlaylistStore();
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   const { driftScores, outlierIds } = useVibeDrift(currentDraft.tracks);
+  const lockedIds = new Set(currentDraft.lockedTrackIds ?? []);
 
   function handleDragEnd(result: DropResult) {
     if (!result.destination) return;
@@ -67,7 +68,7 @@ export function TrackTable() {
       </div>
 
       {/* Table header */}
-      <div className="grid grid-cols-[3rem_3fr_2fr_1fr_3rem] gap-4 px-6 py-3 text-[11px] uppercase tracking-[0.15em] text-on-surface-variant/60 font-bold border-b border-white/5">
+      <div className="grid grid-cols-[3rem_3fr_2fr_1fr_5rem] gap-4 px-6 py-3 text-[11px] uppercase tracking-[0.15em] text-on-surface-variant/60 font-bold border-b border-white/5">
         <span className="text-center">#</span>
         <span>Title</span>
         <span className="hidden md:block">Album</span>
@@ -97,6 +98,8 @@ export function TrackTable() {
                         track={track}
                         index={index}
                         onRemove={() => removeTrack(track.id)}
+                        isLocked={lockedIds.has(track.id)}
+                        onToggleLock={() => toggleTrackLock(track.id)}
                         isOutlier={outlierIds.has(track.id)}
                         driftScore={driftScores[track.id]}
                         dragHandleProps={provided.dragHandleProps ?? undefined}

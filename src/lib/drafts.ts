@@ -26,6 +26,7 @@ function rowToDraft(row: DraftRow, tracks: SpotifyTrack[]): PlaylistDraft {
     prompt: row.prompt ?? undefined,
     mode: row.mode ?? undefined,
     filters: row.filters ?? undefined,
+    lockedTrackIds: row.lockedTrackIds ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     exportedUrl: row.exportedUrl ?? undefined,
@@ -118,6 +119,14 @@ export function parseDraftPayload(body: unknown): PlaylistDraft | null {
 
   const filters = sanitizeFilters(raw.filters);
 
+  // Only keep lock ids that reference tracks actually in the draft.
+  const trackIds = new Set(tracks.map((t) => t.id));
+  const lockedTrackIds = Array.isArray(raw.lockedTrackIds)
+    ? raw.lockedTrackIds
+        .filter((v): v is string => typeof v === "string" && trackIds.has(v))
+        .slice(0, MAX_TRACKS)
+    : undefined;
+
   const createdAt =
     typeof raw.createdAt === "string" && !Number.isNaN(Date.parse(raw.createdAt))
       ? raw.createdAt
@@ -132,6 +141,7 @@ export function parseDraftPayload(body: unknown): PlaylistDraft | null {
     prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, 2000) : undefined,
     mode,
     filters,
+    lockedTrackIds,
     createdAt,
     updatedAt: new Date().toISOString(),
     exportedUrl:
@@ -219,6 +229,7 @@ export async function upsertDraft(
       prompt: draft.prompt ?? null,
       mode: draft.mode ?? null,
       filters: draft.filters ?? null,
+      lockedTrackIds: draft.lockedTrackIds ?? null,
       exportedUrl: draft.exportedUrl ?? null,
       createdAt: existing ? existing.createdAt : new Date(draft.createdAt),
       updatedAt: now,
@@ -236,6 +247,7 @@ export async function upsertDraft(
           prompt: values.prompt,
           mode: values.mode,
           filters: values.filters,
+          lockedTrackIds: values.lockedTrackIds,
           exportedUrl: values.exportedUrl,
           updatedAt: now,
         },
