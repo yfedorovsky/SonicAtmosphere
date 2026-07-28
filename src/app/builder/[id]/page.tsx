@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { PlaylistHeader } from "@/components/builder/playlist-header";
@@ -13,23 +13,46 @@ export default function BuilderPage() {
   const { id } = useParams<{ id: string }>();
   const [showExport, setShowExport] = useState(false);
   const { currentDraft, loadDraft } = usePlaylistStore();
-  const { getDraft, saveDraft } = useDraftsStore();
+  const { getDraft, fetchDraft, saveDraft, isHydrated } = useDraftsStore();
+  // Serialized form of the draft as last loaded/saved — autosave only fires
+  // when the draft actually diverged from it, so merely opening a draft
+  // doesn't PUT a possibly stale copy over newer server state.
+  const lastSyncedRef = useRef<string | null>(null);
 
-  // Load draft from storage if navigating to an existing one
+  // Load draft when navigating to an existing one: local list first, then
+  // the server (direct link). Waits for hydration so the legacy-draft
+  // migration has finished before we conclude a draft doesn't exist.
   useEffect(() => {
-    if (id && id !== currentDraft.id) {
-      const saved = getDraft(id);
-      if (saved) {
-        loadDraft(saved);
-      }
+    if (!id || id === currentDraft.id || !isHydrated) return;
+    const applyLoaded = (draft: typeof currentDraft) => {
+      lastSyncedRef.current = JSON.stringify(draft);
+      loadDraft(draft);
+      // A loaded draft starts its own undo history — stepping "back" into
+      // the previously open draft's tracks would corrupt this one.
+      usePlaylistStore.temporal.getState().clear();
+    };
+    const saved = getDraft(id);
+    if (saved) {
+      applyLoaded(saved);
+      return;
     }
-  }, [id, currentDraft.id, getDraft, loadDraft]);
+    let cancelled = false;
+    void fetchDraft(id).then((draft) => {
+      if (draft && !cancelled) applyLoaded(draft);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, currentDraft.id, isHydrated, getDraft, fetchDraft, loadDraft]);
 
-  // Auto-save draft periodically
+  // Auto-save when the draft diverges from its last synced state
   useEffect(() => {
     if (currentDraft.tracks.length === 0) return;
+    const serialized = JSON.stringify(currentDraft);
+    if (serialized === lastSyncedRef.current) return;
 
     const timer = setTimeout(() => {
+      lastSyncedRef.current = serialized;
       saveDraft(currentDraft);
     }, 2000);
 

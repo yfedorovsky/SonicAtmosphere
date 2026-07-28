@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getRecommendations } from "@/lib/spotify";
+import { getRecommendations } from "@/lib/spotify";
+import { getValidSpotifyToken } from "@/lib/spotify-auth";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const accessToken = await getAccessToken();
+  const accessToken = await getValidSpotifyToken();
 
   if (!accessToken) {
     return NextResponse.json(

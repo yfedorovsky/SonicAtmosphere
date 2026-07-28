@@ -40,6 +40,9 @@ yarn-error.log*
 product_requirements_document.md
 ui_code.html
 
+# local embedded Postgres (PGlite) data
+/.pglite/
+
 # vercel
 .vercel
 

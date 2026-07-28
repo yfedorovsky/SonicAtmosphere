@@ -3,9 +3,12 @@
 import { create } from "zustand";
 import { temporal, type TemporalState } from "zundo";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import type { SpotifyTrack, PlaylistDraft } from "@/types";
+import type { FilterValues, GeneratorMode, SpotifyTrack, PlaylistDraft } from "@/types";
 
 function generateId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
@@ -26,6 +29,12 @@ interface PlaylistActions {
   setTitle: (title: string) => void;
   setDescription: (description: string) => void;
   setCoverUrl: (url: string) => void;
+  setGenerationContext: (context: {
+    prompt?: string;
+    mode?: GeneratorMode;
+    filters?: FilterValues;
+  }) => void;
+  setExportedUrl: (url: string) => void;
   addTrack: (track: SpotifyTrack) => boolean;
   removeTrack: (trackId: string) => void;
   reorderTracks: (startIndex: number, endIndex: number) => void;
@@ -72,6 +81,24 @@ export const usePlaylistStore = create<PlaylistStore>()(
       setCoverUrl: (coverUrl) => {
         set((state) => ({
           currentDraft: { ...state.currentDraft, coverUrl, updatedAt: new Date().toISOString() },
+        }));
+      },
+
+      // Persists what produced this draft (prompt/mode/filters) so a saved
+      // draft can explain and re-run its own generation.
+      setGenerationContext: (context) => {
+        set((state) => ({
+          currentDraft: {
+            ...state.currentDraft,
+            ...context,
+            updatedAt: new Date().toISOString(),
+          },
+        }));
+      },
+
+      setExportedUrl: (exportedUrl) => {
+        set((state) => ({
+          currentDraft: { ...state.currentDraft, exportedUrl, updatedAt: new Date().toISOString() },
         }));
       },
 

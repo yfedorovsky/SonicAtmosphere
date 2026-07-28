@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { randomToken } from "@/lib/crypto";
+
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SCOPES = [
   "playlist-read-private",
@@ -21,7 +23,7 @@ export async function GET() {
     );
   }
 
-  const state = Math.random().toString(36).substring(2, 15);
+  const state = randomToken(16);
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
@@ -31,5 +33,15 @@ export async function GET() {
     show_dialog: "true",
   });
 
-  return NextResponse.redirect(`${SPOTIFY_AUTH_URL}?${params.toString()}`);
+  const response = NextResponse.redirect(`${SPOTIFY_AUTH_URL}?${params.toString()}`);
+  // CSRF protection: the callback rejects any response whose state doesn't
+  // match this short-lived cookie.
+  response.cookies.set("spotify_oauth_state", state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 600,
+    path: "/",
+  });
+  return response;
 }

@@ -1,8 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getRefreshToken, refreshAccessToken, searchTracks } from "@/lib/spotify";
+import { after, NextRequest, NextResponse } from "next/server";
+import { searchTracks } from "@/lib/spotify";
 import { generateRecommendations } from "@/lib/recommendations";
-import { type GeneratorMode } from "@/types";
-import { cookies } from "next/headers";
+import { type FilterValues, type GeneratorMode } from "@/types";
+
+import { getDb } from "@/db";
+import { generationRuns } from "@/db/schema";
+import { clientIp, rateLimit, tooManyRequests } from "@/lib/rate-limit";
+import { getOrCreateUserId } from "@/lib/session";
+import { getValidSpotifyToken } from "@/lib/spotify-auth";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -14,8 +19,43 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ tracks: [] });
   }
 
-  // Try to get a valid access token (with refresh if needed)
-  const accessToken = await getValidAccessToken();
+  // Import matching fires one small search per pasted line, so it gets a
+  // looser bucket than full generation runs. IP gate comes first: cookieless
+  // callers mint a fresh userId per request, so the per-user bucket alone is
+  // trivially rotated.
+  const isImportMatch = type === "track";
+  const ip = clientIp(request);
+  const ipLimited = isImportMatch
+    ? rateLimit(`search-import:ip:${ip}`, 200, 60_000)
+    : rateLimit(`search:ip:${ip}`, 60, 60_000);
+  if (!ipLimited.ok) return tooManyRequests(ipLimited.retryAfterSec);
+
+  const userId = await getOrCreateUserId();
+  const limited = isImportMatch
+    ? rateLimit(`search-import:${userId}`, 120, 60_000)
+    : rateLimit(`search:${userId}`, 30, 60_000);
+  if (!limited.ok) return tooManyRequests(limited.retryAfterSec);
+
+  const moods = searchParams.get("moods")?.split(",").filter(Boolean) || [];
+  const filters: FilterValues = {
+    energy: parseInt(searchParams.get("energy") || "50"),
+    acousticness: parseInt(searchParams.get("acousticness") || "50"),
+    popularity: parseInt(searchParams.get("popularity") || "50"),
+    danceability: parseInt(searchParams.get("danceability") || "50"),
+    valence: parseInt(searchParams.get("valence") || "50"),
+    instrumentalness: parseInt(searchParams.get("instrumentalness") || "50"),
+    moods,
+  };
+  const runContext = {
+    userId,
+    draftId: searchParams.get("draftId"),
+    prompt: query.slice(0, 2000),
+    mode: type as GeneratorMode,
+    filters,
+    isRegenerate: searchParams.get("regen") === "1",
+  };
+
+  const accessToken = await getValidSpotifyToken();
 
   if (!accessToken) {
     // Fallback: use client credentials flow for search-only access
@@ -28,7 +68,6 @@ export async function GET(request: NextRequest) {
     }
 
     // Build a smarter search query from prompt + moods
-    const moods = searchParams.get("moods")?.split(",").filter(Boolean) || [];
     const searchQuery = buildSearchQuery(query, moods);
 
     // Run multiple varied searches in parallel for better coverage
@@ -45,80 +84,51 @@ export async function GET(request: NextRequest) {
       return true;
     }).slice(0, limit);
 
+    if (!isImportMatch) {
+      logGenerationRun({ ...runContext, source: "client-credentials", resultCount: tracks.length });
+    }
     return NextResponse.json({ tracks });
   }
 
-  // Direct track search (used by import matching)
-  if (type === "track") {
+  // Direct track search (used by import matching) — not a generation run
+  if (isImportMatch) {
     const tracks = await searchTracks(query, accessToken, limit);
     return NextResponse.json({ tracks });
   }
-
-  // Full recommendations with user token
-  const filters = {
-    energy: parseInt(searchParams.get("energy") || "50"),
-    acousticness: parseInt(searchParams.get("acousticness") || "50"),
-    popularity: parseInt(searchParams.get("popularity") || "50"),
-    danceability: parseInt(searchParams.get("danceability") || "50"),
-    valence: parseInt(searchParams.get("valence") || "50"),
-    instrumentalness: parseInt(searchParams.get("instrumentalness") || "50"),
-    moods: searchParams.get("moods")?.split(",").filter(Boolean) || [],
-  };
 
   const tracks = await generateRecommendations(accessToken, query, type as GeneratorMode, filters);
 
   // If recommendations returned empty, fall back to search
   if (tracks.length === 0) {
     const searchResults = await searchTracks(query, accessToken, limit);
+    logGenerationRun({ ...runContext, source: "fallback-search", resultCount: searchResults.length });
     return NextResponse.json({ tracks: searchResults });
   }
 
+  logGenerationRun({ ...runContext, source: "recommendations", resultCount: tracks.length });
   return NextResponse.json({ tracks });
 }
 
-// Try to get a valid access token, refreshing if the current one is expired
-async function getValidAccessToken(): Promise<string | null> {
-  const accessToken = await getAccessToken();
-
-  if (!accessToken) {
-    // Try refresh
-    const refreshToken = await getRefreshToken();
-    if (!refreshToken) return null;
-    return await tryRefresh(refreshToken);
-  }
-
-  // Test if token is still valid with a lightweight call
-  const testRes = await fetch("https://api.spotify.com/v1/me", {
-    headers: { Authorization: `Bearer ${accessToken}` },
+// A failed log line must never fail the search; after() defers the write to
+// post-response and keeps serverless instances alive until it lands.
+function logGenerationRun(run: {
+  userId: string;
+  draftId: string | null;
+  prompt: string;
+  mode: GeneratorMode;
+  filters: FilterValues;
+  isRegenerate: boolean;
+  source: string;
+  resultCount: number;
+}): void {
+  after(async () => {
+    try {
+      const db = await getDb();
+      await db.insert(generationRuns).values(run);
+    } catch (err) {
+      console.error("[search] failed to log generation run", err);
+    }
   });
-
-  if (testRes.ok) return accessToken;
-
-  // Token expired — try refresh
-  if (testRes.status === 401) {
-    const refreshToken = await getRefreshToken();
-    if (!refreshToken) return null;
-    return await tryRefresh(refreshToken);
-  }
-
-  return accessToken;
-}
-
-async function tryRefresh(refreshToken: string): Promise<string | null> {
-  const result = await refreshAccessToken(refreshToken);
-  if (!result) return null;
-
-  // Update the cookie with the new token
-  const cookieStore = await cookies();
-  cookieStore.set("spotify_access_token", result.access_token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: result.expires_in,
-    path: "/",
-  });
-
-  return result.access_token;
 }
 
 // Extract meaningful search keywords from a long prompt

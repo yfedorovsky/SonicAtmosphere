@@ -12,7 +12,7 @@ interface ExportModalProps {
 }
 
 export function ExportModal({ open, onClose }: ExportModalProps) {
-  const { currentDraft, setDescription } = usePlaylistStore();
+  const { currentDraft, setDescription, setExportedUrl: setDraftExportedUrl } = usePlaylistStore();
   const { isConnected, user } = useAuthStore();
   const { saveDraft } = useDraftsStore();
   const [isExporting, setIsExporting] = useState(false);
@@ -39,12 +39,16 @@ export function ExportModal({ open, onClose }: ExportModalProps) {
           name: currentDraft.title || "Sonic Atmosphere Playlist",
           description: currentDraft.description,
           trackUris: currentDraft.tracks.map((t) => t.uri),
+          draftId: currentDraft.id,
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
         setExportedUrl(data.url);
+        // Write the url onto the working draft too, so the builder's next
+        // autosave carries it instead of clobbering it.
+        setDraftExportedUrl(data.url);
         saveDraft({ ...currentDraft, exportedUrl: data.url });
       } else {
         const data = await res.json();

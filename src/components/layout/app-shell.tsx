@@ -26,7 +26,7 @@ export function AppShell({
   const { isConnected, setConnected, setDisconnected, setLoading } = useAuthStore();
 
   useEffect(() => {
-    hydrate();
+    void hydrate();
   }, [hydrate]);
 
   // Check auth status on mount

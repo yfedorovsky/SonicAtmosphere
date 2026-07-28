@@ -18,6 +18,9 @@ export default function LibraryPage() {
 
   function handleLoadDraft(draft: typeof drafts[0]) {
     loadDraft(draft);
+    // Fresh draft, fresh undo history — don't let undo step into the
+    // previously open draft's tracks.
+    usePlaylistStore.temporal.getState().clear();
     router.push(`/builder/${draft.id}`);
   }
 
@@ -95,6 +98,7 @@ export default function LibraryPage() {
               <div
                 onClick={() => {
                   initDraft();
+                  usePlaylistStore.temporal.getState().clear();
                   router.push("/generator");
                 }}
                 className="border-2 border-dashed border-outline-variant/20 rounded-xl p-6 flex flex-col items-center justify-center text-center group hover:border-primary/40 transition-all duration-300 cursor-pointer"

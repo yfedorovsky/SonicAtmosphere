@@ -1,31 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { getSessionUserId, SESSION_COOKIE, sessionCookieOptions, sessionCookieValue } from "@/lib/session";
+import { linkSpotifyAccount } from "@/lib/spotify-auth";
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000";
+
+function errorRedirect(code: string): NextResponse {
+  const response = NextResponse.redirect(`${APP_URL}?auth_error=${code}`);
+  response.cookies.delete("spotify_oauth_state");
+  return response;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
+  const state = searchParams.get("state");
 
-  if (error) {
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=${error}`
-    );
-  }
+  if (error) return errorRedirect(error);
+  if (!code) return errorRedirect("no_code");
 
-  if (!code) {
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=no_code`
-    );
+  const expectedState = request.cookies.get("spotify_oauth_state")?.value;
+  if (!expectedState || state !== expectedState) {
+    return errorRedirect("state_mismatch");
   }
 
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}/api/auth/spotify/callback`;
+  const redirectUri = `${APP_URL}/api/auth/spotify/callback`;
 
-  if (!clientId || !clientSecret) {
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=config`
-    );
-  }
+  if (!clientId || !clientSecret) return errorRedirect("config");
 
   try {
     // Exchange code for tokens
@@ -42,52 +46,29 @@ export async function GET(request: NextRequest) {
       }),
     });
 
-    if (!tokenResponse.ok) {
-      return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=token_exchange`
-      );
-    }
+    if (!tokenResponse.ok) return errorRedirect("token_exchange");
 
     const tokens = await tokenResponse.json();
 
-    // Get user profile
     const profileResponse = await fetch("https://api.spotify.com/v1/me", {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
+    if (!profileResponse.ok) return errorRedirect("profile");
+    const profile = await profileResponse.json();
 
-    const profile = profileResponse.ok ? await profileResponse.json() : null;
+    // Tokens now live encrypted in the database, keyed by the app user.
+    const sessionUserId = await getSessionUserId();
+    const userId = await linkSpotifyAccount(profile, tokens, sessionUserId);
 
-    // TODO: Store tokens securely (httpOnly cookie or encrypted session)
-    // For MVP, we'll pass them via URL fragment to the client
-    // In production, use a proper session/cookie approach
-
-    const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}/library`;
-
-    const response = NextResponse.redirect(redirectUrl);
-
-    // Store tokens in httpOnly cookies
-    response.cookies.set("spotify_access_token", tokens.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: tokens.expires_in,
-      path: "/",
-    });
-
-    if (tokens.refresh_token) {
-      response.cookies.set("spotify_refresh_token", tokens.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30, // 30 days
-        path: "/",
-      });
-    }
-
+    const response = NextResponse.redirect(`${APP_URL}/library`);
+    response.cookies.set(SESSION_COOKIE, sessionCookieValue(userId), sessionCookieOptions);
+    response.cookies.delete("spotify_oauth_state");
+    // Retire the legacy plaintext token cookies.
+    response.cookies.delete("spotify_access_token");
+    response.cookies.delete("spotify_refresh_token");
     return response;
-  } catch {
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"}?auth_error=unknown`
-    );
+  } catch (err) {
+    console.error("[auth] Spotify callback failed:", err);
+    return errorRedirect("unknown");
   }
 }

@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 
+import { trackEvent } from "@/lib/events";
+import { clientIp, rateLimit, tooManyRequests } from "@/lib/rate-limit";
+import { getOrCreateUserId } from "@/lib/session";
+
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
@@ -9,12 +13,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // This route spends Anthropic tokens. Throttle by IP before minting an
+  // identity — a cookieless caller gets a fresh userId per request, so a
+  // userId-only bucket would never trip.
+  const ipLimited = rateLimit(`generate-meta:ip:${clientIp(req)}`, 20, 60_000);
+  if (!ipLimited.ok) return tooManyRequests(ipLimited.retryAfterSec);
+
+  const userId = await getOrCreateUserId();
+  const limited = rateLimit(`generate-meta:${userId}`, 10, 60_000);
+  if (!limited.ok) return tooManyRequests(limited.retryAfterSec);
+
   try {
     const anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
     });
 
-    const { prompt, tracks } = await req.json();
+    const body = await req.json();
+    const prompt = typeof body.prompt === "string" ? body.prompt.slice(0, 500) : "";
+    const tracks = body.tracks;
 
     // Limit payload: just artist - track name for the first 15 tracks
     const trackString = (tracks || [])
@@ -53,6 +69,9 @@ Respond ONLY with valid JSON in this exact format, no other text:
     }
 
     const metadata = JSON.parse(jsonStr);
+    trackEvent(userId, "auto_title_generated", {
+      trackCount: Array.isArray(tracks) ? tracks.length : 0,
+    });
     return NextResponse.json(metadata);
   } catch (error) {
     console.error("Claude API Error:", error);

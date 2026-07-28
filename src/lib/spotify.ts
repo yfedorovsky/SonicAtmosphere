@@ -17,6 +17,8 @@ export async function getRefreshToken(): Promise<string | null> {
 export async function refreshAccessToken(refreshToken: string): Promise<{
   access_token: string;
   expires_in: number;
+  refresh_token?: string;
+  scope?: string;
 } | null> {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;

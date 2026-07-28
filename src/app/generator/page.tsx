@@ -11,6 +11,7 @@ import { CurrentDraftPanel } from "@/components/generator/current-draft-panel";
 import { ImportModal } from "@/components/import/import-modal";
 import { Icon } from "@/components/ui/icon";
 import { useDraftsStore } from "@/stores/drafts-store";
+import { usePlaylistStore } from "@/stores/playlist-store";
 import type { GeneratorMode, FilterValues, SpotifyTrack } from "@/types";
 import { DEFAULT_FILTERS, suggestMoodsFromPrompt } from "@/types";
 
@@ -36,10 +37,15 @@ function GeneratorContent() {
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [suggestedMoods, setSuggestedMoods] = useState<string[]>([]);
   const addRecentPrompt = useDraftsStore((s) => s.addRecentPrompt);
+  const currentDraftId = usePlaylistStore((s) => s.currentDraft.id);
+  const setGenerationContext = usePlaylistStore((s) => s.setGenerationContext);
   const isAutoSelectingRef = useRef(false);
+  const runCountRef = useRef(0);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) return;
+    const isRegenerate = runCountRef.current > 0;
+    runCountRef.current += 1;
     setIsLoading(true);
     setHasSearched(true);
     addRecentPrompt(prompt.trim());
@@ -56,6 +62,10 @@ function GeneratorContent() {
       setFilters(activeFilters);
     }
 
+    // Stamp the working draft with what produced it, so the saved draft can
+    // explain and re-run its generation later.
+    setGenerationContext({ prompt: prompt.trim(), mode, filters: activeFilters });
+
     try {
       const params = new URLSearchParams({
         q: prompt.trim(),
@@ -66,9 +76,13 @@ function GeneratorContent() {
         danceability: String(activeFilters.danceability),
         valence: String(activeFilters.valence),
         instrumentalness: String(activeFilters.instrumentalness),
+        draftId: currentDraftId,
       });
       if (activeFilters.moods.length > 0) {
         params.set("moods", activeFilters.moods.join(","));
+      }
+      if (isRegenerate) {
+        params.set("regen", "1");
       }
       const res = await fetch(`/api/spotify/search?${params}`);
       if (res.ok) {
@@ -82,7 +96,7 @@ function GeneratorContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [prompt, mode, filters, addRecentPrompt]);
+  }, [prompt, mode, filters, addRecentPrompt, currentDraftId, setGenerationContext]);
 
   // Auto-generate if prompt came from URL
   useEffect(() => {
