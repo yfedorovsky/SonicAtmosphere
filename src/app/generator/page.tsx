@@ -26,6 +26,7 @@ export default function GeneratorPage() {
 function GeneratorContent() {
   const searchParams = useSearchParams();
   const initialPrompt = searchParams.get("prompt") || "";
+  const templateId = searchParams.get("template");
 
   const [mode, setMode] = useState<GeneratorMode>("vibe");
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -108,6 +109,34 @@ function GeneratorContent() {
     // Only run on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Template flow: load the saved recipe, then generate once state settles.
+  const [templateLoaded, setTemplateLoaded] = useState(false);
+  useEffect(() => {
+    if (!templateId) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/templates/${encodeURIComponent(templateId)}`);
+      if (!res.ok || cancelled) return;
+      const { template } = await res.json();
+      if (cancelled) return;
+      if (template.prompt) setPrompt(template.prompt);
+      if (template.mode && template.mode !== "import") setMode(template.mode);
+      if (template.filters) setFilters(template.filters);
+      setTemplateLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [templateId]);
+
+  useEffect(() => {
+    if (templateLoaded && prompt.trim()) {
+      setTemplateLoaded(false);
+      handleGenerate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateLoaded, prompt]);
 
   const filtersDirty =
     hasSearched &&

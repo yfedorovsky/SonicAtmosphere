@@ -279,6 +279,40 @@ export async function createPlaylist(
   };
 }
 
+// App-only token for search when no user is connected. Cached in-process
+// with an explicit expiry — Next's fetch cache serves stale entries while
+// revalidating, which hands out expired tokens after a restart.
+const globalForSpotify = globalThis as unknown as {
+  __spotifyAppToken?: { token: string; expiresAt: number };
+};
+
+export async function getClientCredentialsToken(): Promise<string | null> {
+  const cached = globalForSpotify.__spotifyAppToken;
+  if (cached && cached.expiresAt > Date.now()) return cached.token;
+
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+
+  const res = await fetch(SPOTIFY_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+    },
+    body: new URLSearchParams({ grant_type: "client_credentials" }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) return null;
+  const data = await res.json();
+  globalForSpotify.__spotifyAppToken = {
+    token: data.access_token,
+    expiresAt: Date.now() + Math.max(60, (data.expires_in ?? 3600) - 120) * 1000,
+  };
+  return data.access_token;
+}
+
 export async function getCurrentUser(
   accessToken: string
 ): Promise<{ id: string; display_name: string; images: { url: string }[]; email: string } | null> {

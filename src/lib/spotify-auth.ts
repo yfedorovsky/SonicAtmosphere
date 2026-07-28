@@ -31,42 +31,45 @@ export interface SpotifyProfile {
 export async function getValidSpotifyToken(): Promise<string | null> {
   const userId = await getSessionUserId();
   if (userId) {
-    const db = await getDb();
-    const [account] = await db
-      .select()
-      .from(spotifyAccounts)
-      .where(eq(spotifyAccounts.userId, userId))
-      .limit(1);
-
-    if (account?.accessToken) {
-      const access = decryptSecret(account.accessToken);
-      const fresh =
-        account.tokenExpiresAt &&
-        account.tokenExpiresAt.getTime() - REFRESH_BUFFER_MS > Date.now();
-      if (access && fresh) return access;
-
-      const refresh = account.refreshToken ? decryptSecret(account.refreshToken) : null;
-      if (refresh) {
-        const result = await refreshAccessToken(refresh);
-        if (result) {
-          await db
-            .update(spotifyAccounts)
-            .set({
-              accessToken: encryptSecret(result.access_token),
-              refreshToken: result.refresh_token
-                ? encryptSecret(result.refresh_token)
-                : account.refreshToken,
-              tokenExpiresAt: new Date(Date.now() + result.expires_in * 1000),
-              updatedAt: new Date(),
-            })
-            .where(eq(spotifyAccounts.id, account.id));
-          return result.access_token;
-        }
-      }
-    }
+    const token = await getSpotifyTokenForUser(userId);
+    if (token) return token;
   }
-
   return getLegacyCookieToken();
+}
+
+// Cookie-free variant for background jobs (scheduled refresh): resolve a
+// working token for a specific user straight from the database.
+export async function getSpotifyTokenForUser(userId: string): Promise<string | null> {
+  const db = await getDb();
+  const [account] = await db
+    .select()
+    .from(spotifyAccounts)
+    .where(eq(spotifyAccounts.userId, userId))
+    .limit(1);
+  if (!account?.accessToken) return null;
+
+  const access = decryptSecret(account.accessToken);
+  const fresh =
+    account.tokenExpiresAt && account.tokenExpiresAt.getTime() - REFRESH_BUFFER_MS > Date.now();
+  if (access && fresh) return access;
+
+  const refresh = account.refreshToken ? decryptSecret(account.refreshToken) : null;
+  if (!refresh) return null;
+  const result = await refreshAccessToken(refresh);
+  if (!result) return null;
+
+  await db
+    .update(spotifyAccounts)
+    .set({
+      accessToken: encryptSecret(result.access_token),
+      refreshToken: result.refresh_token
+        ? encryptSecret(result.refresh_token)
+        : account.refreshToken,
+      tokenExpiresAt: new Date(Date.now() + result.expires_in * 1000),
+      updatedAt: new Date(),
+    })
+    .where(eq(spotifyAccounts.id, account.id));
+  return result.access_token;
 }
 
 async function getLegacyCookieToken(): Promise<string | null> {

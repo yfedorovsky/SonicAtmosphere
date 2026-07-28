@@ -10,6 +10,7 @@ import {
 import { TrackRow } from "./track-row";
 import { AddTrackButton } from "./add-track-button";
 import { ReplaceWeakestPanel } from "./replace-weakest-panel";
+import { LivingPlaylistPanel } from "./living-playlist-panel";
 import { usePlaylistStore, useTemporalStore } from "@/stores/playlist-store";
 import { useVibeDrift } from "@/hooks/use-vibe-drift";
 import { Icon } from "@/components/ui/icon";
@@ -96,6 +97,7 @@ export function TrackTable() {
             </button>
           )}
           <ReplaceWeakestPanel driftScores={driftScores} />
+          <LivingPlaylistPanel />
           <button
             type="button"
             onClick={() => undo()}

@@ -109,6 +109,50 @@ export const generationRuns = pgTable(
   (t) => [index("generation_runs_user_id_idx").on(t.userId, t.createdAt)],
 );
 
+// A reusable generation recipe: "make me another one like this".
+export const playlistTemplates = pgTable(
+  "playlist_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prompt: text("prompt"),
+    mode: text("mode").$type<GeneratorMode>(),
+    filters: jsonb("filters").$type<FilterValues>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("playlist_templates_user_id_idx").on(t.userId, t.createdAt)],
+);
+
+// "Living playlist" rules: keep X%, rotate the rest on a cadence.
+export const refreshRules = pgTable(
+  "refresh_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    draftId: text("draft_id")
+      .notNull()
+      .references(() => playlistDrafts.id, { onDelete: "cascade" }),
+    cadence: text("cadence").$type<"daily" | "weekly">().notNull(),
+    keepPercent: integer("keep_percent").notNull().default(60),
+    // Avoid the same artist within N consecutive tracks; null = no constraint.
+    artistRepeatWindow: integer("artist_repeat_window"),
+    enabled: boolean("enabled").notNull().default(true),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("refresh_rules_draft_id_idx").on(t.draftId),
+    index("refresh_rules_due_idx").on(t.enabled, t.nextRunAt),
+  ],
+);
+
 export const analyticsEvents = pgTable(
   "analytics_events",
   {

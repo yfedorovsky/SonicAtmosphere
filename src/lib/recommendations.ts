@@ -136,6 +136,102 @@ function extractArtistHints(prompt: string): string[] {
   return artists.slice(0, 2);
 }
 
+// Keyword fallback for vibe generation without a user token: several varied
+// searches run in parallel and merged for coverage.
+export async function keywordVibeSearch(
+  accessToken: string,
+  prompt: string,
+  moods: string[],
+  limit: number
+): Promise<SpotifyTrack[]> {
+  const queries = [buildSearchQuery(prompt, moods), ...getAlternateQueries(prompt, moods)];
+  const results = await Promise.all(queries.map((q) => searchTracks(q, accessToken, 10)));
+  const seen = new Set<string>();
+  return results
+    .flat()
+    .filter((t) => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+// Extract meaningful search keywords from a long prompt
+function buildSearchQuery(prompt: string, moods: string[]): string {
+  const stopWords = new Set([
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "is", "it", "that", "this", "are", "was",
+    "be", "have", "has", "had", "do", "does", "did", "will", "would",
+    "could", "should", "may", "might", "your", "you", "my", "our", "their",
+    "its", "every", "each", "designed", "elevate", "fuel", "builds",
+    "reimagined", "pumped", "momentum", "maximum", "impact", "track",
+    "tracks", "music", "songs", "playlist", "curated", "perfect",
+    "featuring", "inspired", "styled", "based", "like", "feel", "feeling",
+    "vibes", "vibe", "mood", "atmosphere", "sonic", "sound", "sounds",
+  ]);
+
+  const words = prompt
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stopWords.has(w));
+
+  const keywords = [...new Set(words)].slice(0, 4);
+
+  for (const mood of moods.slice(0, 2)) {
+    const m = mood.toLowerCase();
+    if (!keywords.includes(m)) keywords.push(m);
+  }
+
+  return keywords.slice(0, 5).join(" ");
+}
+
+// Generate alternate search queries for broader results
+function getAlternateQueries(prompt: string, moods: string[]): string[] {
+  const lower = prompt.toLowerCase();
+  const queries: string[] = [];
+
+  const moodSearchTerms: Record<string, string> = {
+    electronic: "electronic synth",
+    dreamy: "dream pop ethereal",
+    melancholic: "melancholy sad indie",
+    nocturnal: "late night chill",
+    ambient: "ambient atmospheric",
+    acoustic: "acoustic unplugged",
+    shoegaze: "shoegaze reverb",
+    "lo-fi": "lofi beats",
+    cinematic: "cinematic soundtrack",
+    energetic: "high energy upbeat",
+  };
+
+  for (const mood of moods.slice(0, 2)) {
+    const terms = moodSearchTerms[mood.toLowerCase()];
+    if (terms) queries.push(terms);
+  }
+
+  const vibeKeywords = [
+    "workout", "gym", "running", "fitness",
+    "study", "focus", "chill", "relax",
+    "party", "dance", "club",
+    "road trip", "driving", "cruise",
+    "romantic", "love", "date night",
+    "morning", "sunrise", "coffee",
+    "rain", "night", "midnight",
+    "sad", "happy", "dark", "upbeat",
+    "hip-hop", "rap", "r&b", "jazz", "rock", "pop", "indie",
+    "lo-fi", "lofi", "classical", "metal", "punk", "folk",
+    "anthems", "classics", "hits", "remix", "remixes",
+  ];
+
+  const foundVibes = vibeKeywords.filter((v) => lower.includes(v));
+  if (foundVibes.length > 0) {
+    queries.push(foundVibes.slice(0, 3).join(" "));
+  }
+
+  return queries.slice(0, 2);
+}
+
 export async function generateRecommendations(
   accessToken: string,
   prompt: string,

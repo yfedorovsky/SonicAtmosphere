@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { MoodCard } from "@/components/library/mood-card";
@@ -7,11 +8,45 @@ import { DraftItem } from "@/components/library/draft-item";
 import { Icon } from "@/components/ui/icon";
 import { useDraftsStore } from "@/stores/drafts-store";
 import { usePlaylistStore } from "@/stores/playlist-store";
+import type { FilterValues, GeneratorMode } from "@/types";
+
+interface PlaylistTemplate {
+  id: string;
+  name: string;
+  prompt: string | null;
+  mode: GeneratorMode | null;
+  filters: FilterValues | null;
+}
 
 export default function LibraryPage() {
   const router = useRouter();
   const { drafts, deleteDraft } = useDraftsStore();
   const { loadDraft, initDraft } = usePlaylistStore();
+  const [templates, setTemplates] = useState<PlaylistTemplate[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/templates")
+      .then((res) => (res.ok ? res.json() : { templates: [] }))
+      .then((data) => {
+        if (!cancelled) setTemplates(data.templates ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function handleUseTemplate(template: PlaylistTemplate) {
+    initDraft();
+    usePlaylistStore.temporal.getState().clear();
+    router.push(`/generator?template=${template.id}`);
+  }
+
+  function handleDeleteTemplate(id: string) {
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    void fetch(`/api/templates/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+  }
 
   const exportedDrafts = drafts.filter((d) => d.exportedUrl);
   const savedDrafts = drafts.filter((d) => !d.exportedUrl);
@@ -67,6 +102,52 @@ export default function LibraryPage() {
                     tagColor="primary"
                     onClick={() => handleLoadDraft(draft)}
                   />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Templates */}
+        {templates.length > 0 && (
+          <section className="mb-20 animate-fade-up stagger-3">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="font-headline text-xl font-bold flex items-center gap-3">
+                <span className="w-1 h-5 rounded-full bg-secondary" />
+                Templates
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {templates.map((template) => (
+                <div
+                  key={template.id}
+                  className="group bg-surface-container/50 border border-white/10 rounded-2xl p-5 flex items-center justify-between gap-4 hover:border-secondary/30 transition-all"
+                >
+                  <div className="min-w-0">
+                    <p className="font-bold text-on-surface truncate">{template.name}</p>
+                    <p className="text-xs text-on-surface-variant/70 truncate">
+                      {template.mode ? `${template.mode} · ` : ""}
+                      {template.prompt || "No prompt"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleUseTemplate(template)}
+                      title="Generate a new draft from this template"
+                      className="p-2 rounded-full text-secondary hover:bg-secondary/10 transition-colors"
+                    >
+                      <Icon name="play_arrow" filled />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTemplate(template.id)}
+                      title="Delete template"
+                      className="p-2 rounded-full text-on-surface-variant/40 hover:text-error hover:bg-error/10 transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      <Icon name="delete" size="sm" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
