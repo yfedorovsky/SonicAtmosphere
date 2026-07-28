@@ -27,6 +27,7 @@ function rowToDraft(row: DraftRow, tracks: SpotifyTrack[]): PlaylistDraft {
     mode: row.mode ?? undefined,
     filters: row.filters ?? undefined,
     lockedTrackIds: row.lockedTrackIds ?? undefined,
+    trackRationales: row.trackRationales ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     exportedUrl: row.exportedUrl ?? undefined,
@@ -119,13 +120,23 @@ export function parseDraftPayload(body: unknown): PlaylistDraft | null {
 
   const filters = sanitizeFilters(raw.filters);
 
-  // Only keep lock ids that reference tracks actually in the draft.
+  // Only keep lock ids / rationale keys that reference tracks in the draft.
   const trackIds = new Set(tracks.map((t) => t.id));
   const lockedTrackIds = Array.isArray(raw.lockedTrackIds)
     ? raw.lockedTrackIds
         .filter((v): v is string => typeof v === "string" && trackIds.has(v))
         .slice(0, MAX_TRACKS)
     : undefined;
+
+  let trackRationales: Record<string, string> | undefined;
+  if (raw.trackRationales && typeof raw.trackRationales === "object") {
+    trackRationales = {};
+    for (const [key, value] of Object.entries(raw.trackRationales)) {
+      if (trackIds.has(key) && typeof value === "string") {
+        trackRationales[key] = value.slice(0, 300);
+      }
+    }
+  }
 
   const createdAt =
     typeof raw.createdAt === "string" && !Number.isNaN(Date.parse(raw.createdAt))
@@ -142,6 +153,7 @@ export function parseDraftPayload(body: unknown): PlaylistDraft | null {
     mode,
     filters,
     lockedTrackIds,
+    trackRationales,
     createdAt,
     updatedAt: new Date().toISOString(),
     exportedUrl:
@@ -230,6 +242,7 @@ export async function upsertDraft(
       mode: draft.mode ?? null,
       filters: draft.filters ?? null,
       lockedTrackIds: draft.lockedTrackIds ?? null,
+      trackRationales: draft.trackRationales ?? null,
       exportedUrl: draft.exportedUrl ?? null,
       createdAt: existing ? existing.createdAt : new Date(draft.createdAt),
       updatedAt: now,
@@ -248,6 +261,7 @@ export async function upsertDraft(
           mode: values.mode,
           filters: values.filters,
           lockedTrackIds: values.lockedTrackIds,
+          trackRationales: values.trackRationales,
           exportedUrl: values.exportedUrl,
           updatedAt: now,
         },

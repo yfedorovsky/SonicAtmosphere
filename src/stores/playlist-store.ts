@@ -12,6 +12,16 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+function omitKey(
+  map: Record<string, string> | undefined,
+  key: string,
+): Record<string, string> | undefined {
+  if (!map || !(key in map)) return map;
+  const rest = { ...map };
+  delete rest[key];
+  return rest;
+}
+
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
@@ -37,6 +47,8 @@ interface PlaylistActions {
   setExportedUrl: (url: string) => void;
   toggleTrackLock: (trackId: string) => void;
   isTrackLocked: (trackId: string) => boolean;
+  replaceTracks: (removedIds: string[], replacements: SpotifyTrack[]) => void;
+  setTrackRationales: (rationales: Record<string, string>) => void;
   addTrack: (track: SpotifyTrack) => boolean;
   removeTrack: (trackId: string) => void;
   reorderTracks: (startIndex: number, endIndex: number) => void;
@@ -123,6 +135,50 @@ export const usePlaylistStore = create<PlaylistStore>()(
       isTrackLocked: (trackId) =>
         (get().currentDraft.lockedTrackIds ?? []).includes(trackId),
 
+      // Swap tracks in place (each removed slot takes the next replacement)
+      // in a single set() so the whole swap is one undo step.
+      replaceTracks: (removedIds, replacements) => {
+        set((state) => {
+          const removedSet = new Set(removedIds);
+          const queue = [...replacements];
+          const tracks: SpotifyTrack[] = [];
+          for (const t of state.currentDraft.tracks) {
+            if (removedSet.has(t.id)) {
+              const next = queue.shift();
+              if (next) tracks.push(next);
+            } else {
+              tracks.push(t);
+            }
+          }
+          tracks.push(...queue);
+          let rationales = state.currentDraft.trackRationales;
+          for (const id of removedIds) {
+            rationales = omitKey(rationales, id);
+          }
+          return {
+            currentDraft: {
+              ...state.currentDraft,
+              tracks,
+              lockedTrackIds: state.currentDraft.lockedTrackIds?.filter(
+                (id) => !removedSet.has(id),
+              ),
+              trackRationales: rationales,
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        });
+      },
+
+      setTrackRationales: (rationales) => {
+        set((state) => ({
+          currentDraft: {
+            ...state.currentDraft,
+            trackRationales: { ...state.currentDraft.trackRationales, ...rationales },
+            updatedAt: new Date().toISOString(),
+          },
+        }));
+      },
+
       addTrack: (track) => {
         const { currentDraft } = get();
         if (currentDraft.tracks.some((t) => t.id === track.id)) return false;
@@ -141,8 +197,9 @@ export const usePlaylistStore = create<PlaylistStore>()(
           currentDraft: {
             ...state.currentDraft,
             tracks: state.currentDraft.tracks.filter((t) => t.id !== trackId),
-            // A removed track must not linger in the lock list.
+            // A removed track must not linger in the lock or rationale maps.
             lockedTrackIds: state.currentDraft.lockedTrackIds?.filter((id) => id !== trackId),
+            trackRationales: omitKey(state.currentDraft.trackRationales, trackId),
             updatedAt: new Date().toISOString(),
           },
         }));

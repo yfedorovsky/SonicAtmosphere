@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   DragDropContext,
   Droppable,
@@ -8,19 +9,51 @@ import {
 } from "@hello-pangea/dnd";
 import { TrackRow } from "./track-row";
 import { AddTrackButton } from "./add-track-button";
+import { ReplaceWeakestPanel } from "./replace-weakest-panel";
 import { usePlaylistStore, useTemporalStore } from "@/stores/playlist-store";
 import { useVibeDrift } from "@/hooks/use-vibe-drift";
 import { Icon } from "@/components/ui/icon";
 
 export function TrackTable() {
-  const { currentDraft, removeTrack, reorderTracks, toggleTrackLock } = usePlaylistStore();
+  const { currentDraft, removeTrack, reorderTracks, toggleTrackLock, setTrackRationales } =
+    usePlaylistStore();
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   const { driftScores, outlierIds } = useVibeDrift(currentDraft.tracks);
   const lockedIds = new Set(currentDraft.lockedTrackIds ?? []);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const rationales = currentDraft.trackRationales ?? {};
+  const unexplained = currentDraft.tracks.filter((t) => !rationales[t.id]);
 
   function handleDragEnd(result: DropResult) {
     if (!result.destination) return;
     reorderTracks(result.source.index, result.destination.index);
+  }
+
+  async function handleExplainPicks() {
+    if (isExplaining || unexplained.length === 0) return;
+    setIsExplaining(true);
+    try {
+      const res = await fetch("/api/rationale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: currentDraft.prompt || currentDraft.title,
+          tracks: unexplained.map((t) => ({
+            id: t.id,
+            artist: t.artists.map((a) => a.name).join(", "),
+            name: t.name,
+          })),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rationales) setTrackRationales(data.rationales);
+      }
+    } catch {
+      // Rationales are an enhancement — fail quietly.
+    } finally {
+      setIsExplaining(false);
+    }
   }
 
   if (currentDraft.tracks.length === 0) {
@@ -46,6 +79,23 @@ export function TrackTable() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-headline text-2xl font-bold">Tracklist</h2>
         <div className="flex items-center gap-2">
+          {unexplained.length > 0 && (
+            <button
+              type="button"
+              onClick={handleExplainPicks}
+              disabled={isExplaining}
+              title="Generate a short 'why this track is here' note for each track"
+              className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold bg-surface-container/60 border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 transition-all disabled:opacity-50"
+            >
+              <Icon
+                name={isExplaining ? "progress_activity" : "psychology"}
+                size="sm"
+                className={isExplaining ? "animate-spin" : undefined}
+              />
+              {isExplaining ? "Explaining..." : "Explain picks"}
+            </button>
+          )}
+          <ReplaceWeakestPanel driftScores={driftScores} />
           <button
             type="button"
             onClick={() => undo()}
@@ -100,6 +150,7 @@ export function TrackTable() {
                         onRemove={() => removeTrack(track.id)}
                         isLocked={lockedIds.has(track.id)}
                         onToggleLock={() => toggleTrackLock(track.id)}
+                        rationale={rationales[track.id]}
                         isOutlier={outlierIds.has(track.id)}
                         driftScore={driftScores[track.id]}
                         dragHandleProps={provided.dragHandleProps ?? undefined}

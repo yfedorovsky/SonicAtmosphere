@@ -12,13 +12,14 @@ interface TrackRowProps {
   onRemove: () => void;
   isLocked?: boolean;
   onToggleLock?: () => void;
+  rationale?: string;
   isOutlier?: boolean;
   driftScore?: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dragHandleProps?: any;
 }
 
-export function TrackRow({ track, index, onRemove, isLocked, onToggleLock, isOutlier, driftScore, dragHandleProps }: TrackRowProps) {
+export function TrackRow({ track, index, onRemove, isLocked, onToggleLock, rationale, isOutlier, driftScore, dragHandleProps }: TrackRowProps) {
   const albumArt = track.album.images[track.album.images.length - 1]?.url;
   const { currentTrack, isPlaying, toggle } = usePlaybackStore();
   const isCurrentlyPlaying = currentTrack?.id === track.id && isPlaying;
@@ -82,6 +83,11 @@ export function TrackRow({ track, index, onRemove, isLocked, onToggleLock, isOut
           <span className="text-sm text-on-surface-variant truncate">
             {track.artists.map((a) => a.name).join(", ")}
           </span>
+          {rationale && (
+            <span className="text-xs text-on-surface-variant/60 italic truncate" title={rationale}>
+              {rationale}
+            </span>
+          )}
           {isOutlier && (
             <span className="text-[10px] text-tertiary flex items-center gap-1 mt-0.5" title={`Vibe drift: ${Math.round((driftScore || 0) * 100)}%`}>
               <Icon name="warning" size="sm" className="text-tertiary" />

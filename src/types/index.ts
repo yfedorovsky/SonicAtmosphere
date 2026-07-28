@@ -39,6 +39,8 @@ export interface PlaylistDraft {
   // Locked tracks are "keepers": protected from removal and skipped by
   // replace operations (Sprint 2 editing loop).
   lockedTrackIds?: string[];
+  // trackId -> short "why this track is here" note (AI-generated).
+  trackRationales?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
   exportedUrl?: string;
