@@ -4,11 +4,7 @@ import type { Db } from "@/db";
 import { refreshRules } from "@/db/schema";
 import { getDraftById, upsertDraft } from "@/lib/drafts";
 import { trackEvent } from "@/lib/events";
-import {
-  generateRecommendations,
-  keywordVibeSearch,
-  songRecommendations,
-} from "@/lib/recommendations";
+import { generateRecommendations, keywordVibeSearch } from "@/lib/recommendations";
 import { getClientCredentialsToken } from "@/lib/spotify";
 import { getSpotifyTokenForUser } from "@/lib/spotify-auth";
 import type { SpotifyTrack } from "@/types";
@@ -81,12 +77,7 @@ export async function runRefresh(db: Db, spec: RefreshSpec): Promise<RefreshResu
   const token = userToken ?? (await getClientCredentialsToken());
   if (!token) return { ok: false, replaced: 0, reason: "No Spotify access" };
 
-  let candidates: SpotifyTrack[] = [];
-  if (mode === "song") {
-    candidates = await songRecommendations(token, prompt, filters);
-  } else if (userToken) {
-    candidates = await generateRecommendations(userToken, prompt, mode, filters);
-  }
+  let candidates = await generateRecommendations(token, prompt, mode, filters);
   if (candidates.length === 0) {
     candidates = await keywordVibeSearch(token, prompt, filters.moods, 30);
   }

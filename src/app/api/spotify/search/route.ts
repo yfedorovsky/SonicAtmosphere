@@ -1,10 +1,6 @@
 ﻿import { after, NextRequest, NextResponse } from "next/server";
 import { getClientCredentialsToken, searchTracks } from "@/lib/spotify";
-import {
-  generateRecommendations,
-  keywordVibeSearch,
-  songRecommendations,
-} from "@/lib/recommendations";
+import { generateRecommendations, keywordVibeSearch } from "@/lib/recommendations";
 import { type FilterValues, type GeneratorMode } from "@/types";
 
 import { getDb } from "@/db";
@@ -59,50 +55,34 @@ export async function GET(request: NextRequest) {
     isRegenerate: searchParams.get("regen") === "1",
   };
 
+  // Every generator mode works with an app-only token now — the grounded
+  // LLM + search pipeline needs nothing user-scoped.
   const accessToken = await getValidSpotifyToken();
-
-  if (!accessToken) {
-    // Fallback: use client credentials flow for search-only access
-    const clientToken = await getClientCredentialsToken();
-    if (!clientToken) {
-      return NextResponse.json(
-        { error: "Not authenticated. Connect Spotify to search." },
-        { status: 401 }
-      );
-    }
-
-    // Song mode's similarity logic only needs endpoints client-credentials
-    // tokens can reach — use it even without a connected Spotify account.
-    if (type === "song") {
-      const tracks = await songRecommendations(clientToken, query, filters);
-      logGenerationRun({ ...runContext, source: "client-credentials", resultCount: tracks.length });
-      return NextResponse.json({ tracks });
-    }
-
-    const tracks = await keywordVibeSearch(clientToken, query, moods, limit);
-
-    if (!isImportMatch) {
-      logGenerationRun({ ...runContext, source: "client-credentials", resultCount: tracks.length });
-    }
-    return NextResponse.json({ tracks });
+  const token = accessToken ?? (await getClientCredentialsToken());
+  if (!token) {
+    return NextResponse.json(
+      { error: "Not authenticated. Connect Spotify to search." },
+      { status: 401 }
+    );
   }
 
   // Direct track search (used by import matching) — not a generation run
   if (isImportMatch) {
-    const tracks = await searchTracks(query, accessToken, limit);
+    const tracks = await searchTracks(query, token, limit);
     return NextResponse.json({ tracks });
   }
 
-  const tracks = await generateRecommendations(accessToken, query, type as GeneratorMode, filters);
+  const source = accessToken ? "user-token" : "client-credentials";
+  const tracks = await generateRecommendations(token, query, type as GeneratorMode, filters);
 
-  // If recommendations returned empty, fall back to search
+  // If recommendations returned empty, fall back to keyword search
   if (tracks.length === 0) {
-    const searchResults = await searchTracks(query, accessToken, limit);
-    logGenerationRun({ ...runContext, source: "fallback-search", resultCount: searchResults.length });
+    const searchResults = await keywordVibeSearch(token, query, moods, limit);
+    logGenerationRun({ ...runContext, source: `${source}-fallback`, resultCount: searchResults.length });
     return NextResponse.json({ tracks: searchResults });
   }
 
-  logGenerationRun({ ...runContext, source: "recommendations", resultCount: tracks.length });
+  logGenerationRun({ ...runContext, source, resultCount: tracks.length });
   return NextResponse.json({ tracks });
 }
 

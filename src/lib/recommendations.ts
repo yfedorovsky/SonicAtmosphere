@@ -137,8 +137,8 @@ function extractArtistHints(prompt: string): string[] {
   return artists.slice(0, 2);
 }
 
-// Keyword fallback for vibe generation without a user token: several varied
-// searches run in parallel and merged for coverage.
+// Keyword fallback for vibe generation: several varied searches run in
+// parallel and merged for coverage. Last resort when the LLM is unavailable.
 export async function keywordVibeSearch(
   accessToken: string,
   prompt: string,
@@ -253,7 +253,200 @@ export async function generateRecommendations(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Grounded neighborhood machinery
+//
+// This Spotify app tier gets 403s from /recommendations, /audio-features,
+// top-tracks, and playlist items, and artist objects carry no genres — the
+// only reliable tool is search. So for every generator mode: Claude proposes
+// a musical neighborhood (real artists + genre terms) grounded in signals we
+// CAN read (artist catalogs, playlist names), and Spotify search resolves it
+// to real tracks with strict hygiene filters.
+// ---------------------------------------------------------------------------
+
+const normalize = (s: string) =>
+  s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
+const cleanQuery = (s: string) => s.replace(/"/g, "").trim();
+// Same song re-released on another album carries a different Spotify id —
+// key on normalized artist|title with version suffixes stripped.
+const songKey = (t: SpotifyTrack) =>
+  `${normalize(t.artists[0]?.name ?? "")}|${normalize(
+    t.name.replace(/\s*[([].*?[)\]]\s*/g, " ").split(" - ")[0]
+  )}`;
+
+interface Neighborhood {
+  artists: string[];
+  genres: string[];
+  keywords: string[];
+}
+
+// One JSON round trip to Claude. Opus-tier knowledge matters: obscure artists
+// misidentified by a smaller model produce a completely wrong playlist.
+async function askNeighborhood(content: string): Promise<Neighborhood | null> {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const response = await anthropic.messages.create({
+      model: "claude-opus-5",
+      max_tokens: 2000,
+      messages: [{ role: "user", content }],
+    });
+    if (response.stop_reason === "refusal") return null;
+    const textBlock = response.content.find((c) => c.type === "text");
+    if (!textBlock || textBlock.type !== "text") return null;
+    let jsonStr = textBlock.text.trim();
+    if (jsonStr.startsWith("```")) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    }
+    const parsed = JSON.parse(jsonStr);
+    const strings = (v: unknown, max: number) =>
+      Array.isArray(v)
+        ? v.filter((x): x is string => typeof x === "string").slice(0, max)
+        : [];
+    return {
+      artists: strings(parsed.artists, 8),
+      genres: strings(parsed.genres, 3),
+      keywords: strings(parsed.keywords, 2),
+    };
+  } catch (err) {
+    console.error("[recommendations] neighborhood expansion failed:", err);
+    return null;
+  }
+}
+
+interface ResolveOptions {
+  // Pre-fetched on-vibe tracks (e.g. the seed artist's own catalog), ranked
+  // in the top tier alongside named-artist results.
+  tierZeroTracks?: SpotifyTrack[];
+  anchorPopularity: number;
+  exclude?: SpotifyTrack[];
+  // Cap on generic genre/keyword-search results — broad tags pull in filler.
+  tierOneCap?: number;
+  limit: number;
+}
+
+async function resolveAndRank(
+  accessToken: string,
+  neighborhood: Neighborhood,
+  opts: ResolveOptions
+): Promise<SpotifyTrack[]> {
+  const artistQueries = neighborhood.artists.map(cleanQuery).filter(Boolean).slice(0, 8);
+  const genreQueries = neighborhood.genres.map(cleanQuery).filter(Boolean).slice(0, 3);
+  const keywordQueries = neighborhood.keywords.map(cleanQuery).filter(Boolean).slice(0, 2);
+
+  // Spotify's artist: filter fuzzy-matches (querying "L'Eclair" also returns
+  // the composer "Leclair") and matches featured credits (querying "Ludacris"
+  // returns Justin Bieber's "Baby") — keep only tracks where the named artist
+  // is the PRIMARY artist.
+  const [artistResults, genreResults, keywordResults] = await Promise.all([
+    Promise.all(
+      artistQueries.map(async (name) => {
+        const tracks = await searchTracks(`artist:"${name}"`, accessToken, 10);
+        return tracks.filter((t) => normalize(t.artists[0]?.name ?? "") === normalize(name));
+      })
+    ),
+    Promise.all(genreQueries.map((g) => searchTracks(`genre:"${g}"`, accessToken, 8))),
+    Promise.all(keywordQueries.map((q) => searchTracks(q, accessToken, 8))),
+  ]);
+
+  // Tiered ranking: named artists (and any pre-supplied catalog) are safer
+  // bets than generic genre/keyword hits; within a tier, prefer popularity
+  // near the anchor.
+  const tiers: [SpotifyTrack[], number][] = [
+    [opts.tierZeroTracks ?? [], 0],
+    [artistResults.flat(), 0],
+    [genreResults.flat(), 1],
+    [keywordResults.flat(), 1],
+  ];
+  const seen = new Set<string>((opts.exclude ?? []).map((t) => t.id));
+  const seenSongs = new Set<string>((opts.exclude ?? []).map(songKey));
+  const unique: { t: SpotifyTrack; tier: number }[] = [];
+  for (const [tracks, tier] of tiers) {
+    for (const t of tracks) {
+      if (seen.has(t.id) || seenSongs.has(songKey(t))) continue;
+      // Skits, interludes, and interstitial fragments are never on-vibe.
+      if (t.duration_ms > 0 && t.duration_ms < 61_000) continue;
+      seen.add(t.id);
+      seenSongs.add(songKey(t));
+      unique.push({ t, tier });
+    }
+  }
+  unique.sort(
+    (a, b) =>
+      a.tier - b.tier ||
+      Math.abs(a.t.popularity - opts.anchorPopularity) -
+        Math.abs(b.t.popularity - opts.anchorPopularity)
+  );
+
+  // Count every credited artist so features can't flood the list either.
+  const perArtist = new Map<string, number>();
+  const candidates: SpotifyTrack[] = [];
+  const tierOneCap = opts.tierOneCap ?? 4;
+  let tierOneSlots = 0;
+  for (const { t, tier } of unique) {
+    if (tier === 1 && tierOneSlots >= tierOneCap) continue;
+    const keys = t.artists.length > 0 ? t.artists.map((a) => a.id) : [t.id];
+    if (keys.some((k) => (perArtist.get(k) ?? 0) >= 2)) continue;
+    for (const k of keys) perArtist.set(k, (perArtist.get(k) ?? 0) + 1);
+    if (tier === 1) tierOneSlots += 1;
+    candidates.push(t);
+  }
+  return candidates.slice(0, opts.limit);
+}
+
+// ---------------------------------------------------------------------------
+// Vibe mode
+// ---------------------------------------------------------------------------
+
 async function vibeRecommendations(
+  accessToken: string,
+  prompt: string,
+  filters: FilterValues
+): Promise<SpotifyTrack[]> {
+  // Native recommendations first — best quality where the app still has access
+  const nativeTracks = await nativeVibeRecommendations(accessToken, prompt, filters);
+  if (nativeTracks.length > 0) return nativeTracks;
+
+  // Grounding: names of public playlists matching the vibe keywords describe
+  // how real curators label this mood.
+  const playlistMeta = await searchPlaylistNames(
+    buildSearchQuery(prompt, filters.moods),
+    accessToken,
+    8
+  );
+  const playlistNames = playlistMeta
+    .map((p) => (p.description ? `${p.name} (${p.description})` : p.name))
+    .slice(0, 8);
+
+  const neighborhood = await askNeighborhood(
+    `A listener described the playlist they want:
+"${prompt}"
+${filters.moods.length ? `Selected mood tags: ${filters.moods.join(", ")}` : ""}
+${playlistNames.length ? `Names of real public playlists matching these keywords: ${playlistNames.join("; ")}` : ""}
+
+Name real artists whose actual music delivers this vibe. Rules:
+- If the description references a specific song or artist, anchor on that artist and their closest peers.
+- Interpret sensory or scene-setting words ("coffee aroma", "rainy night") as a MOOD, never literally — do not pick novelty, background-music, or coffee-shop-compilation acts.
+- Prefer credible artists a music critic would name; never content-farm, tribute, karaoke, or "study beats" channel acts.
+
+Respond ONLY with valid JSON in this exact format, no other text:
+{"artists": ["...8 artists..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."]}`
+  );
+
+  if (neighborhood && (neighborhood.artists.length > 0 || neighborhood.genres.length > 0)) {
+    const tracks = await resolveAndRank(accessToken, neighborhood, {
+      anchorPopularity: filters.popularity,
+      tierOneCap: 6,
+      limit: 20,
+    });
+    if (tracks.length > 0) return tracks;
+  }
+
+  // Last resort: plain keyword search
+  return keywordVibeSearch(accessToken, prompt, filters.moods, 20);
+}
+
+async function nativeVibeRecommendations(
   accessToken: string,
   prompt: string,
   filters: FilterValues
@@ -262,7 +455,6 @@ async function vibeRecommendations(
   const audioParams = extractAudioParams(prompt);
   const artistHints = extractArtistHints(prompt);
 
-  // Add mood filters
   for (const mood of filters.moods) {
     const moodGenres = VIBE_TO_GENRES[mood.toLowerCase()];
     if (moodGenres) {
@@ -272,48 +464,33 @@ async function vibeRecommendations(
     }
   }
 
-  // Seed mixing: try to combine artist seeds with genre seeds (max 5 total)
   let seedArtistIds: string[] = [];
   if (artistHints.length > 0) {
     const artistResults = await Promise.all(
       artistHints.map((name) => searchArtists(name, accessToken, 1))
     );
-    seedArtistIds = artistResults
-      .filter((r) => r.length > 0)
-      .map((r) => r[0].id);
+    seedArtistIds = artistResults.filter((r) => r.length > 0).map((r) => r[0].id);
   }
 
-  const totalSeeds = seedArtistIds.length + genres.length;
-  if (totalSeeds > 0) {
-    // Balance seeds: artists take priority, genres fill remaining slots
-    const maxGenres = Math.max(0, 5 - seedArtistIds.length);
-    const uniqueGenres = [...new Set(genres)].slice(0, maxGenres);
+  if (seedArtistIds.length + genres.length === 0) return [];
 
-    const recParams: RecommendationParams = {
-      target_energy: audioParams.target_energy ?? filters.energy,
-      target_acousticness: audioParams.target_acousticness ?? filters.acousticness,
-      target_popularity: filters.popularity,
-      target_danceability: filters.danceability,
-      target_valence: filters.valence,
-      target_instrumentalness: filters.instrumentalness,
-      // Spread negative prompting constraints
-      ...filterConstraints(audioParams),
-      limit: 20,
-    };
+  const maxGenres = Math.max(0, 5 - seedArtistIds.length);
+  const uniqueGenres = [...new Set(genres)].slice(0, maxGenres);
 
-    if (seedArtistIds.length > 0) {
-      recParams.seed_artists = seedArtistIds.slice(0, 5).join(",");
-    }
-    if (uniqueGenres.length > 0) {
-      recParams.seed_genres = uniqueGenres.join(",");
-    }
+  const recParams: RecommendationParams = {
+    target_energy: audioParams.target_energy ?? filters.energy,
+    target_acousticness: audioParams.target_acousticness ?? filters.acousticness,
+    target_popularity: filters.popularity,
+    target_danceability: filters.danceability,
+    target_valence: filters.valence,
+    target_instrumentalness: filters.instrumentalness,
+    ...filterConstraints(audioParams),
+    limit: 20,
+  };
+  if (seedArtistIds.length > 0) recParams.seed_artists = seedArtistIds.slice(0, 5).join(",");
+  if (uniqueGenres.length > 0) recParams.seed_genres = uniqueGenres.join(",");
 
-    const tracks = await getRecommendations(accessToken, recParams);
-    if (tracks.length > 0) return tracks;
-  }
-
-  // Fallback: search with prompt keywords
-  return searchTracks(prompt, accessToken, 20);
+  return getRecommendations(accessToken, recParams);
 }
 
 // Extract only constraint params (max_*, min_*) for spreading
@@ -330,6 +507,10 @@ function filterConstraints(params: Partial<RecommendationParams>): Partial<Recom
   return constraints;
 }
 
+// ---------------------------------------------------------------------------
+// Song mode
+// ---------------------------------------------------------------------------
+
 export async function songRecommendations(
   accessToken: string,
   prompt: string,
@@ -344,9 +525,7 @@ export async function songRecommendations(
   const seed = [...seedResults].sort((a, b) => b.popularity - a.popularity)[0];
 
   const seedTrackIds = seedResults.map((t) => t.id).slice(0, 2);
-  const seedArtistIds = seedResults
-    .flatMap((t) => t.artists.map((a) => a.id))
-    .slice(0, 3);
+  const seedArtistIds = seedResults.flatMap((t) => t.artists.map((a) => a.id)).slice(0, 3);
 
   // Native recommendations first — best quality where the app still has access
   const tracks = await getRecommendations(accessToken, {
@@ -363,23 +542,14 @@ export async function songRecommendations(
   });
   if (tracks.length > 0) return tracks;
 
-  // The /recommendations endpoint is restricted for newer Spotify apps.
-  // Rebuild "similar vibes" from endpoints that still work: the seed
-  // artist's top tracks + genre searches, ranked by similarity to the seed.
   return similarBySeedTrack(accessToken, seed);
 }
 
-// This Spotify app tier gets 403s from /recommendations, /audio-features,
-// top-tracks, and playlist items, and artist objects carry no genres — the
-// only reliable tool is search. So: Claude proposes the musical neighborhood
-// (similar artists + genre terms) grounded in real catalog/playlist signals,
-// and Spotify search resolves real tracks.
 async function similarBySeedTrack(
   accessToken: string,
   seed: SpotifyTrack
 ): Promise<SpotifyTrack[]> {
-  const clean = (s: string) => s.replace(/"/g, "").trim();
-  const primaryArtist = clean(seed.artists[0]?.name ?? "");
+  const primaryArtist = cleanQuery(seed.artists[0]?.name ?? "");
 
   // Grounding signals: the artist's own catalog and the names of playlists
   // featuring the song describe its actual style — so the LLM isn't guessing
@@ -391,120 +561,26 @@ async function similarBySeedTrack(
     searchPlaylistNames(`${seed.name} ${primaryArtist}`, accessToken, 8),
   ]);
 
-  const neighborhood = await expandNeighborhood(seed, artistTracks, playlistMeta);
+  const artistNames = seed.artists.map((a) => a.name).join(", ");
+  const otherTitles = artistTracks
+    .filter((t) => t.id !== seed.id)
+    .map((t) => t.name)
+    .slice(0, 8);
+  const playlistNames = playlistMeta
+    .map((p) => (p.description ? `${p.name} (${p.description})` : p.name))
+    .slice(0, 8);
+  const clues = [
+    otherTitles.length ? `- Other tracks by this artist: ${otherTitles.join("; ")}` : "",
+    playlistNames.length
+      ? `- Public playlists featuring this song: ${playlistNames.join("; ")}`
+      : "",
+    seed.album.name ? `- Album: "${seed.album.name}"` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-  const artistQueries = (neighborhood?.artists ?? []).map(clean).filter(Boolean).slice(0, 8);
-  const genreQueries = (neighborhood?.genres ?? []).map(clean).filter(Boolean).slice(0, 3);
-
-  // Spotify's artist: filter fuzzy-matches (querying "L'Eclair" also returns
-  // the composer "Leclair") and matches featured credits (querying "Ludacris"
-  // returns Justin Bieber's "Baby") — keep only tracks where the named artist
-  // is the PRIMARY artist.
-  const normalize = (s: string) =>
-    s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
-  const [artistResults, genreResults] = await Promise.all([
-    Promise.all(
-      artistQueries.map(async (name) => {
-        const tracks = await searchTracks(`artist:"${name}"`, accessToken, 10);
-        return tracks.filter((t) => normalize(t.artists[0]?.name ?? "") === normalize(name));
-      })
-    ),
-    Promise.all(genreQueries.map((g) => searchTracks(`genre:"${g}"`, accessToken, 8))),
-  ]);
-
-  // Tiered ranking: the seed artist's own tracks and named similar artists
-  // are safer bets than generic genre-search hits; within a tier, prefer
-  // popularity near the seed's. Cap 2 per artist so no act floods the list.
-  const tiers: [SpotifyTrack[], number][] = [
-    [artistTracks, 0],
-    [artistResults.flat(), 0],
-    [genreResults.flat(), 1],
-  ];
-  // Dedupe by id AND by normalized artist|title — the same song re-released
-  // on another album carries a different Spotify id.
-  const songKey = (t: SpotifyTrack) =>
-    `${normalize(t.artists[0]?.name ?? "")}|${normalize(
-      t.name.replace(/\s*[([].*?[)\]]\s*/g, " ").split(" - ")[0]
-    )}`;
-  const seen = new Set<string>([seed.id]);
-  const seenSongs = new Set<string>([songKey(seed)]);
-  const unique: { t: SpotifyTrack; tier: number }[] = [];
-  for (const [tracks, tier] of tiers) {
-    for (const t of tracks) {
-      if (seen.has(t.id) || seenSongs.has(songKey(t))) continue;
-      // Skits, interludes, and interstitial fragments are never on-vibe.
-      if (t.duration_ms > 0 && t.duration_ms < 61_000) continue;
-      seen.add(t.id);
-      seenSongs.add(songKey(t));
-      unique.push({ t, tier });
-    }
-  }
-  unique.sort(
-    (a, b) =>
-      a.tier - b.tier ||
-      Math.abs(a.t.popularity - seed.popularity) - Math.abs(b.t.popularity - seed.popularity)
-  );
-
-  // Count every credited artist so features can't flood the list either, and
-  // cap generic genre-search hits — broad genre tags pull in pop filler.
-  const perArtist = new Map<string, number>();
-  const candidates: SpotifyTrack[] = [];
-  let genreSlots = 0;
-  for (const { t, tier } of unique) {
-    if (tier === 1 && genreSlots >= 4) continue;
-    const keys = t.artists.length > 0 ? t.artists.map((a) => a.id) : [t.id];
-    if (keys.some((k) => (perArtist.get(k) ?? 0) >= 2)) continue;
-    for (const k of keys) perArtist.set(k, (perArtist.get(k) ?? 0) + 1);
-    if (tier === 1) genreSlots += 1;
-    candidates.push(t);
-  }
-
-  // Lead with the liked song itself so the playlist starts from it.
-  return [seed, ...candidates].slice(0, 21);
-}
-
-interface SongNeighborhood {
-  artists: string[];
-  genres: string[];
-}
-
-async function expandNeighborhood(
-  seed: SpotifyTrack,
-  artistTracks: SpotifyTrack[],
-  playlistMeta: { name: string; description: string }[]
-): Promise<SongNeighborhood | null> {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  try {
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const artistNames = seed.artists.map((a) => a.name).join(", ");
-
-    const otherTitles = artistTracks
-      .filter((t) => t.id !== seed.id)
-      .map((t) => t.name)
-      .slice(0, 8);
-    const playlistNames = playlistMeta
-      .map((p) => (p.description ? `${p.name} (${p.description})` : p.name))
-      .slice(0, 8);
-
-    const clues = [
-      otherTitles.length ? `- Other tracks by this artist: ${otherTitles.join("; ")}` : "",
-      playlistNames.length
-        ? `- Public playlists featuring this song: ${playlistNames.join("; ")}`
-        : "",
-      seed.album.name ? `- Album: "${seed.album.name}"` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const response = await anthropic.messages.create({
-      // Opus-tier knowledge matters here: obscure artists misidentified by a
-      // smaller model produce a completely wrong playlist.
-      model: "claude-opus-5",
-      max_tokens: 2000,
-      messages: [
-        {
-          role: "user",
-          content: `I want to find more music with the same vibe as the song "${seed.name}" by ${artistNames}.
+  const neighborhood = await askNeighborhood(
+    `I want to find more music with the same vibe as the song "${seed.name}" by ${artistNames}.
 
 Context clues about this song's actual style, gathered from Spotify:
 ${clues || "- (none available)"}
@@ -512,90 +588,129 @@ ${clues || "- (none available)"}
 If you know this artist, use your knowledge of their sound. If you do NOT recognize them, derive the style strictly from the context clues above — never fall back to generic popular artists.
 
 Respond ONLY with valid JSON in this exact format, no other text:
-{"artists": ["...8 similar-sounding artists, not ${artistNames}..."], "genres": ["...3 short genre terms as used on Spotify, e.g. dream pop, psychedelic funk..."]}`,
-        },
-      ],
-    });
-    if (response.stop_reason === "refusal") return null;
-    const textBlock = response.content.find((c) => c.type === "text");
-    if (!textBlock || textBlock.type !== "text") return null;
-    let jsonStr = textBlock.text.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-    const parsed = JSON.parse(jsonStr);
-    return {
-      artists: Array.isArray(parsed.artists)
-        ? parsed.artists.filter((a: unknown): a is string => typeof a === "string").slice(0, 8)
-        : [],
-      genres: Array.isArray(parsed.genres)
-        ? parsed.genres.filter((g: unknown): g is string => typeof g === "string").slice(0, 3)
-        : [],
-    };
-  } catch (err) {
-    console.error("[song-mode] neighborhood expansion failed:", err);
-    return null;
+{"artists": ["...8 similar-sounding artists, not ${artistNames}..."], "genres": ["...3 short genre terms as used on Spotify, e.g. dream pop, psychedelic funk..."], "keywords": []}`
+  );
+
+  if (!neighborhood) {
+    return [seed, ...artistTracks.filter((t) => t.id !== seed.id)].slice(0, 21);
   }
+
+  const candidates = await resolveAndRank(accessToken, neighborhood, {
+    tierZeroTracks: artistTracks,
+    anchorPopularity: seed.popularity,
+    exclude: [seed],
+    tierOneCap: 4,
+    limit: 20,
+  });
+
+  // Lead with the liked song itself so the playlist starts from it.
+  return [seed, ...candidates].slice(0, 21);
 }
+
+// ---------------------------------------------------------------------------
+// Artist mode
+// ---------------------------------------------------------------------------
 
 async function artistRecommendations(
   accessToken: string,
   prompt: string,
   filters: FilterValues
 ): Promise<SpotifyTrack[]> {
-  // Search for the artist
   const artists = await searchArtists(prompt, accessToken, 1);
   if (artists.length === 0) {
     return searchTracks(prompt, accessToken, 20);
   }
-
   const artist = artists[0];
 
-  // Get top tracks + related artist tracks
+  // Native path first — works where the app still has catalog access
   const [topTracks, relatedArtists] = await Promise.all([
     getArtistTopTracks(artist.id, accessToken),
     getRelatedArtists(artist.id, accessToken),
   ]);
+  if (topTracks.length > 0 || relatedArtists.length > 0) {
+    const recommended = await getRecommendations(accessToken, {
+      seed_artists: [artist.id, ...relatedArtists.slice(0, 2).map((a) => a.id)].join(","),
+      target_energy: filters.energy,
+      target_acousticness: filters.acousticness,
+      target_popularity: filters.popularity,
+      target_danceability: filters.danceability,
+      target_valence: filters.valence,
+      target_instrumentalness: filters.instrumentalness,
+      limit: 15,
+    });
+    const allTracks = [...topTracks, ...recommended];
+    if (allTracks.length > 5) {
+      const seen = new Set<string>();
+      return allTracks
+        .filter((t) => {
+          if (seen.has(t.id)) return false;
+          seen.add(t.id);
+          return true;
+        })
+        .slice(0, 25);
+    }
+  }
 
-  // Also get recommendations seeded by this artist
-  const recommended = await getRecommendations(accessToken, {
-    seed_artists: [artist.id, ...relatedArtists.slice(0, 2).map((a) => a.id)].join(","),
-    target_energy: filters.energy,
-    target_acousticness: filters.acousticness,
-    target_popularity: filters.popularity,
-    target_danceability: filters.danceability,
-    target_valence: filters.valence,
-    target_instrumentalness: filters.instrumentalness,
-    limit: 15,
+  // Grounded LLM path: the artist's catalog + playlist names anchor the
+  // neighborhood, exactly as in song mode.
+  const [catalog, playlistMeta] = await Promise.all([
+    searchTracks(`artist:"${cleanQuery(artist.name)}"`, accessToken, 10),
+    searchPlaylistNames(artist.name, accessToken, 8),
+  ]);
+  const ownTracks = catalog.filter(
+    (t) => normalize(t.artists[0]?.name ?? "") === normalize(artist.name)
+  );
+
+  const titles = ownTracks.map((t) => t.name).slice(0, 8);
+  const playlistNames = playlistMeta
+    .map((p) => (p.description ? `${p.name} (${p.description})` : p.name))
+    .slice(0, 8);
+
+  const neighborhood = await askNeighborhood(
+    `I want an "artist radio" playlist for ${artist.name}: some of their tracks plus similar-sounding artists.
+
+Context clues gathered from Spotify:
+${titles.length ? `- Tracks by this artist: ${titles.join("; ")}` : ""}
+${playlistNames.length ? `- Public playlists featuring them: ${playlistNames.join("; ")}` : ""}
+
+If you know this artist, use your knowledge of their sound. If you do NOT recognize them, derive the style strictly from the context clues above — never fall back to generic popular artists.
+
+Respond ONLY with valid JSON in this exact format, no other text:
+{"artists": ["...8 similar-sounding artists, not ${artist.name}..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": []}`
+  );
+
+  const anchor = ownTracks[0]?.popularity ?? filters.popularity;
+  if (!neighborhood) return ownTracks.slice(0, 21);
+
+  const candidates = await resolveAndRank(accessToken, neighborhood, {
+    tierZeroTracks: ownTracks,
+    anchorPopularity: anchor,
+    tierOneCap: 4,
+    limit: 21,
   });
-
-  // Combine and deduplicate
-  const allTracks = [...topTracks, ...recommended];
-  const seen = new Set<string>();
-  return allTracks.filter((t) => {
-    if (seen.has(t.id)) return false;
-    seen.add(t.id);
-    return true;
-  }).slice(0, 25);
+  return candidates.length > 0 ? candidates : ownTracks.slice(0, 21);
 }
+
+// ---------------------------------------------------------------------------
+// Genre mode
+// ---------------------------------------------------------------------------
 
 async function genreRecommendations(
   accessToken: string,
   prompt: string,
   filters: FilterValues
 ): Promise<SpotifyTrack[]> {
-  // Clean up genre input
   const genres = prompt
     .toLowerCase()
-    .split(/[,;\s]+/)
+    .split(/[,;]+/)
     .map((g) => g.trim())
     .filter(Boolean)
-    .slice(0, 5);
-
+    .slice(0, 3);
   if (genres.length === 0) return [];
 
+  // Native recommendations first — works where the app still has access
   const tracks = await getRecommendations(accessToken, {
-    seed_genres: genres.join(","),
+    seed_genres: genres.map((g) => g.replace(/\s+/g, "-")).join(","),
     target_energy: filters.energy,
     target_acousticness: filters.acousticness,
     target_popularity: filters.popularity,
@@ -604,9 +719,23 @@ async function genreRecommendations(
     target_instrumentalness: filters.instrumentalness,
     limit: 20,
   });
-
   if (tracks.length > 0) return tracks;
 
-  // Fallback: search by genre name
+  // genre:"..." field search alone surfaces obscure text matches — have
+  // Claude name the genre's defining artists and blend both.
+  const neighborhood = await askNeighborhood(
+    `Name the artists that define ${genres.join(" + ")} as a genre — a mix of the canonical acts and strong current ones.
+
+Respond ONLY with valid JSON in this exact format, no other text:
+{"artists": ["...8 artists..."], "genres": ${JSON.stringify(genres)}, "keywords": []}`
+  );
+
+  const resolved = await resolveAndRank(
+    accessToken,
+    neighborhood ?? { artists: [], genres, keywords: [] },
+    { anchorPopularity: filters.popularity, tierOneCap: 6, limit: 20 }
+  );
+  if (resolved.length > 0) return resolved;
+
   return searchTracks(genres.join(" "), accessToken, 20);
 }
