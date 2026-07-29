@@ -10,7 +10,7 @@ import {
   type RecommendationParams,
 } from "./spotify";
 import type { SpotifyTrack, GeneratorMode, FilterValues } from "@/types";
-import { fetchAudioFeatures } from "@/lib/audio-features";
+import { fetchAudioFeatures, fetchDeezerBpm } from "@/lib/audio-features";
 
 // Map vibe keywords to Spotify genre seeds
 const VIBE_TO_GENRES: Record<string, string[]> = {
@@ -273,7 +273,12 @@ export async function generateRecommendations(
   // Song mode leads with the seed itself — keep it in front regardless of tempo.
   return {
     ...result,
-    tracks: await annotateAndRankByTempo(result.tracks, tempoTarget, mode === "song"),
+    tracks: await annotateAndRankByTempo(
+      result.tracks,
+      tempoTarget,
+      mode === "song",
+      filters.energy
+    ),
   };
 }
 
@@ -356,21 +361,50 @@ function tempoHint(target: TempoTarget | null): string {
 async function annotateAndRankByTempo(
   tracks: SpotifyTrack[],
   target: TempoTarget | null,
-  pinFirst: boolean
+  pinFirst: boolean,
+  energyDial = 50
 ): Promise<SpotifyTrack[]> {
   if (tracks.length === 0) return tracks;
   const features = await fetchAudioFeatures(tracks.map((t) => t.id));
+
+  // Coverage gap-fill: tracks the features provider doesn't know (deep jazz
+  // cuts, regional releases) can still get a BPM from Deezer via their ISRC.
+  const gapFill = new Map<string, number>();
+  await Promise.all(
+    tracks
+      .filter((t) => !features.get(t.id) && t.isrc)
+      .map(async (t) => {
+        const bpm = await fetchDeezerBpm(t.isrc as string);
+        if (bpm !== null) gapFill.set(t.id, bpm);
+      })
+  );
+
+  const energyOf = new Map<string, number>();
   const annotated = tracks.map((t) => {
     const f = features.get(t.id);
-    return f ? { ...t, tempo: Math.round(f.tempo) } : t;
+    if (f) energyOf.set(t.id, f.energy);
+    const tempo = f?.tempo ?? gapFill.get(t.id);
+    return tempo != null ? { ...t, tempo: Math.round(tempo) } : t;
   });
-  if (!target) return annotated;
+
+  // The energy dial reorders only when the user actually moved it off center.
+  const energyActive = Math.abs(energyDial - 50) > 10;
+  if (!target && !energyActive) return annotated;
 
   const head = pinFirst ? annotated.slice(0, 1) : [];
   const rest = pinFirst ? annotated.slice(1) : annotated;
+  const energyDist = (t: SpotifyTrack) => {
+    const e = energyOf.get(t.id);
+    return e == null ? 25 : Math.abs(e * 100 - energyDial);
+  };
   const ranked = rest
-    .map((t, i) => ({ t, dist: tempoDistance(t.tempo, target), i }))
-    .sort((a, b) => a.dist - b.dist || a.i - b.i)
+    .map((t, i) => ({
+      t,
+      tempoD: target ? tempoDistance(t.tempo, target) : 0,
+      energyD: energyActive ? energyDist(t) : 0,
+      i,
+    }))
+    .sort((a, b) => a.tempoD - b.tempoD || a.energyD - b.energyD || a.i - b.i)
     .map((x) => x.t);
   return [...head, ...ranked];
 }
@@ -400,6 +434,10 @@ interface Neighborhood {
   artists: string[];
   genres: string[];
   keywords: string[];
+  // Specific exemplar songs as "Title | Artist". Artist-level selection can't
+  // express within-catalog mood: a jazz giant's most-streamed tracks are their
+  // mellowest, so "chaotic hard bop" needs Claude to name the burners.
+  tracks?: string[];
 }
 
 // One JSON round trip to Claude. Opus-tier knowledge matters: obscure artists
@@ -438,11 +476,36 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
       artists: strings(parsed.artists, 8),
       genres: strings(parsed.genres, 3),
       keywords: strings(parsed.keywords, 2),
+      tracks: strings(parsed.tracks, 6),
     };
   } catch (err) {
     console.error("[recommendations] neighborhood expansion failed:", err);
     return null;
   }
+}
+
+// Resolve "Title | Artist" exemplar entries to real tracks: exact-ish search,
+// then require the named artist as PRIMARY artist and a title match, so a
+// misremembered exemplar degrades to nothing instead of a cover-farm hit.
+async function resolveExemplarTracks(
+  accessToken: string,
+  entries: string[]
+): Promise<SpotifyTrack[]> {
+  const resolved = await Promise.all(
+    entries.map(async (entry) => {
+      const [title, artist] = entry.split("|").map((s) => cleanQuery(s));
+      if (!title || !artist) return null;
+      const hits = await searchTracks(`track:"${title}" artist:"${artist}"`, accessToken, 3);
+      return (
+        hits.find(
+          (t) =>
+            normalize(t.artists[0]?.name ?? "") === normalize(artist) &&
+            normalize(t.name).includes(normalize(title))
+        ) ?? null
+      );
+    })
+  );
+  return resolved.filter((t): t is SpotifyTrack => t !== null);
 }
 
 interface ResolveOptions {
@@ -554,19 +617,26 @@ async function vibeRecommendations(
     `A listener described the playlist they want:
 "${prompt}"
 ${filters.moods.length ? `Selected mood tags: ${filters.moods.join(", ")}` : ""}
+${filters.energy !== 50 ? `Listener's energy dial: ${filters.energy}/100 (0 = stillness, 100 = frantic)` : ""}
 ${playlistNames.length ? `Names of real public playlists matching these keywords: ${playlistNames.join("; ")}` : ""}
 
 Name real artists whose actual music delivers this vibe. Rules:
 - If the description references a specific song or artist, anchor on that artist and their closest peers.
 - Interpret sensory or scene-setting words ("coffee aroma", "rainy night") as a MOOD, never literally — do not pick novelty, background-music, or coffee-shop-compilation acts.
-- Prefer credible artists a music critic would name; never content-farm, tribute, karaoke, or "study beats" channel acts.${tempoHint(tempoTarget)}
+- Prefer credible artists a music critic would name; never content-farm, tribute, karaoke, or "study beats" channel acts.
+- Vivid descriptors ("chaotic", "gentle", "hypnotic", "frantic") are the PRIMARY selection signal and outrank genre-canon defaults — a canonical-but-calm classic is a wrong pick when the listener asked for chaos.
+- An artist's most popular tracks are often their mellowest — when the description implies a specific energy, tempo, or intensity, the "tracks" list must name individual songs famous for exactly that quality, not the artist's biggest hits.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
-{"artists": ["...8 artists..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."]}`
+{"artists": ["...8 artists..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."]}`
   );
 
   if (neighborhood && (neighborhood.artists.length > 0 || neighborhood.genres.length > 0)) {
+    // Claude's exemplar songs lead the playlist — they carry the within-catalog
+    // mood (energy/tempo/intensity) that artist-level search can't express.
+    const exemplars = await resolveExemplarTracks(accessToken, neighborhood.tracks ?? []);
     const tracks = await resolveAndRank(accessToken, neighborhood, {
+      tierZeroTracks: exemplars,
       anchorPopularity: filters.popularity,
       tierOneCap: 6,
       limit: 20,

@@ -74,6 +74,7 @@ function sanitizeTrack(t: SpotifyTrack): SpotifyTrack {
     },
     popularity: typeof t.popularity === "number" ? t.popularity : 0,
     ...(typeof t.tempo === "number" && Number.isFinite(t.tempo) ? { tempo: t.tempo } : {}),
+    ...(typeof t.isrc === "string" && t.isrc.length <= 20 ? { isrc: t.isrc } : {}),
   };
 }
 

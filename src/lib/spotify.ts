@@ -365,5 +365,6 @@ function mapSpotifyTrack(t: any): SpotifyTrack {
     preview_url: t.preview_url || null,
     external_urls: t.external_urls || { spotify: "" },
     popularity: t.popularity || 0,
+    ...(typeof t.external_ids?.isrc === "string" ? { isrc: t.external_ids.isrc } : {}),
   };
 }

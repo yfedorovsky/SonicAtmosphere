@@ -25,7 +25,7 @@ function deezerCache(): Map<string, number | null> {
 // BPM Charlie Parker ballad came back as 132.6 on one release and ~89 on two
 // others of the SAME recording). Deezer exposes its own perceptual BPM keyed
 // by ISRC — when the two providers disagree beyond tolerance, Deezer wins.
-async function fetchDeezerBpm(isrc: string): Promise<number | null> {
+export async function fetchDeezerBpm(isrc: string): Promise<number | null> {
   const cached = deezerCache().get(isrc);
   if (cached !== undefined) return cached;
   const controller = new AbortController();

@@ -14,6 +14,8 @@ export interface SpotifyTrack {
   popularity: number;
   /** Beats per minute, when known (sourced outside Spotify — see lib/audio-features). */
   tempo?: number;
+  /** Recording identifier, used to join non-Spotify data sources (Deezer BPM). */
+  isrc?: string;
 }
 
 export interface ParsedTrackLine {
