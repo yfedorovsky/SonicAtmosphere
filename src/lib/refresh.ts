@@ -77,7 +77,11 @@ export async function runRefresh(db: Db, spec: RefreshSpec): Promise<RefreshResu
   const token = userToken ?? (await getClientCredentialsToken());
   if (!token) return { ok: false, replaced: 0, reason: "No Spotify access" };
 
-  const recommended = await generateRecommendations(token, prompt, mode, filters);
+  // sequence: false — rotation picks the first passing candidates, so the
+  // list must stay fit-ranked, not flow-ordered.
+  const recommended = await generateRecommendations(token, prompt, mode, filters, {
+    sequence: false,
+  });
   // Degraded candidates are plain keyword-search output (e.g. the LLM was
   // unavailable). Rotating them into a living playlist trades curated tracks
   // for junk — keep the current tracks and let the next run rotate them.

@@ -63,7 +63,9 @@ function spotifyIdFromHref(href: unknown): string | null {
 function toAudioFeatures(spotifyId: string, raw: Record<string, unknown>): AudioFeatures | null {
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const tempo = num(raw.tempo);
-  if (tempo === null) return null;
+  // Tempo 0 means the provider's beat detection failed; out-of-range values
+  // are detector glitches. Same 40–250 sanity window as the Deezer path.
+  if (tempo === null || tempo < 40 || tempo > 250) return null;
   return {
     id: spotifyId,
     energy: num(raw.energy) ?? 0,

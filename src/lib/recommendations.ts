@@ -10,6 +10,7 @@ import {
   type RecommendationParams,
 } from "./spotify";
 import type { SpotifyTrack, GeneratorMode, FilterValues } from "@/types";
+import type { AudioFeatures } from "./spotify";
 import { fetchAudioFeatures, fetchDeezerBpm } from "@/lib/audio-features";
 
 // Map vibe keywords to Spotify genre seeds
@@ -241,13 +242,20 @@ function getAlternateQueries(prompt: string, moods: string[]): string[] {
 export interface RecommendationResult {
   tracks: SpotifyTrack[];
   degraded: boolean;
+  // Resolved exemplar track ids (vibe mode) — the acoustic center of gravity
+  // the final ranking measures candidates against. Not serialized to clients.
+  exemplarIds?: string[];
 }
 
 export async function generateRecommendations(
   accessToken: string,
   prompt: string,
   mode: GeneratorMode,
-  filters: FilterValues
+  filters: FilterValues,
+  // sequence: order the final list for listening flow. Callers that treat the
+  // list prefix as "best N candidates" (living-playlist refresh, replace
+  // weakest) must pass false to keep fit-ranked order.
+  options: { sequence?: boolean } = {}
 ): Promise<RecommendationResult> {
   // Only free-text modes can express a workout/tempo intent. Song and artist
   // prompts are titles/names — "Born to Run" is not a running request.
@@ -271,17 +279,26 @@ export async function generateRecommendations(
       result = { tracks: await searchTracks(prompt, accessToken, 20), degraded: false };
   }
   // Song mode leads with the seed itself — keep it in front regardless of tempo.
-  const ranked = await annotateAndRankByTempo(
-    result.tracks,
-    tempoTarget,
-    mode === "song",
-    filters.energy
-  );
-  // Vibe mode may over-fetch for the feature re-rank; trim back after ranking.
-  return {
-    ...result,
-    tracks: mode === "vibe" ? ranked.slice(0, 20) : ranked,
-  };
+  const { ranked, features } = await annotateAndRank(result.tracks, {
+    target: tempoTarget,
+    pinFirst: mode === "song",
+    energyDial: filters.energy,
+    exemplarIds: result.exemplarIds ?? [],
+  });
+  // Vibe over-fetches so ranking selects from a wider pool; the artist cap
+  // trims back to 20 while keeping the list read as curated, not repetitive.
+  let tracks = mode === "vibe" ? capOnePerArtist(ranked, 20) : ranked;
+  // Without a cadence-first order to preserve, sequence the final list as a
+  // minimum-transition-cost path (energy + tempo + Camelot compatibility).
+  if (
+    (options.sequence ?? true) &&
+    (mode === "vibe" || mode === "genre") &&
+    !tempoTarget &&
+    !result.degraded
+  ) {
+    tracks = sequenceForFlow(tracks, features);
+  }
+  return { ...result, tracks };
 }
 
 // ---------------------------------------------------------------------------
@@ -360,14 +377,35 @@ function tempoHint(target: TempoTarget | null): string {
 // Annotate every track with BPM when known; with an active target, stable-sort
 // matches first, unknowns in the middle, misses last. Nothing is dropped —
 // tempo data has gaps and a shorter playlist is worse than an imperfect tail.
-async function annotateAndRankByTempo(
+interface RankContext {
+  target: TempoTarget | null;
+  pinFirst: boolean;
+  energyDial: number;
+  // Acoustic center of gravity: candidates rank by feature distance to these
+  // tracks, bypassing catalog popularity order ("popularity bypass").
+  exemplarIds: string[];
+}
+
+// Texture dimensions used for exemplar-centroid distance (all 0..1).
+const TEXTURE_DIMS = [
+  "energy",
+  "danceability",
+  "valence",
+  "acousticness",
+  "instrumentalness",
+] as const;
+
+async function annotateAndRank(
   tracks: SpotifyTrack[],
-  target: TempoTarget | null,
-  pinFirst: boolean,
-  energyDial = 50
-): Promise<SpotifyTrack[]> {
-  if (tracks.length === 0) return tracks;
-  const features = await fetchAudioFeatures(tracks.map((t) => t.id));
+  ctx: RankContext
+): Promise<{ ranked: SpotifyTrack[]; features: Map<string, AudioFeatures> }> {
+  if (tracks.length === 0) return { ranked: tracks, features: new Map() };
+  // Union with exemplar ids: exemplars can be cut from the candidate pool by
+  // popularity/caps, but the centroid must still reflect all of them.
+  const features = await fetchAudioFeatures([
+    ...tracks.map((t) => t.id),
+    ...ctx.exemplarIds,
+  ]);
 
   // Coverage gap-fill: tracks the features provider doesn't know (deep jazz
   // cuts, regional releases) can still get a BPM from Deezer via their ISRC.
@@ -381,34 +419,161 @@ async function annotateAndRankByTempo(
       })
   );
 
-  const energyOf = new Map<string, number>();
   const annotated = tracks.map((t) => {
     const f = features.get(t.id);
-    if (f) energyOf.set(t.id, f.energy);
     const tempo = f?.tempo ?? gapFill.get(t.id);
     return tempo != null ? { ...t, tempo: Math.round(tempo) } : t;
   });
 
-  // The energy dial reorders only when the user actually moved it off center.
-  const energyActive = Math.abs(energyDial - 50) > 10;
-  if (!target && !energyActive) return annotated;
+  // Exemplar centroid over texture dimensions, when exemplars resolved.
+  const exemplarFeatures = ctx.exemplarIds
+    .map((id) => features.get(id))
+    .filter((f): f is AudioFeatures => !!f);
+  const centroid =
+    exemplarFeatures.length >= 2
+      ? TEXTURE_DIMS.map(
+          (dim) =>
+            exemplarFeatures.reduce((sum, f) => sum + f[dim], 0) / exemplarFeatures.length
+        )
+      : null;
 
-  const head = pinFirst ? annotated.slice(0, 1) : [];
-  const rest = pinFirst ? annotated.slice(1) : annotated;
-  const energyDist = (t: SpotifyTrack) => {
-    const e = energyOf.get(t.id);
-    return e == null ? 25 : Math.abs(e * 100 - energyDial);
+  const centroidDist = (t: SpotifyTrack): number => {
+    const f = features.get(t.id);
+    if (!f || !centroid) return 0.25; // neutral for unknowns / no centroid
+    return (
+      TEXTURE_DIMS.reduce((sum, dim, i) => sum + Math.abs(f[dim] - centroid[i]), 0) /
+      TEXTURE_DIMS.length
+    );
+  };
+
+  const energyActive = Math.abs(ctx.energyDial - 50) > 10;
+  const energyDist = (t: SpotifyTrack): number => {
+    const e = features.get(t.id)?.energy;
+    return e == null ? 0.25 : Math.abs(e - ctx.energyDial / 100);
+  };
+
+  if (!ctx.target && !energyActive && !centroid) return { ranked: annotated, features };
+
+  const head = ctx.pinFirst ? annotated.slice(0, 1) : [];
+  const rest = ctx.pinFirst ? annotated.slice(1) : annotated;
+  // Tempo intent dominates; texture fit to exemplars and the explicit energy
+  // dial share the second key; original (tier/popularity) order breaks ties.
+  const textureScore = (t: SpotifyTrack): number => {
+    const parts: number[] = [];
+    if (centroid) parts.push(centroidDist(t));
+    if (energyActive) parts.push(energyDist(t));
+    return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : 0;
   };
   const ranked = rest
     .map((t, i) => ({
       t,
-      tempoD: target ? tempoDistance(t.tempo, target) : 0,
-      energyD: energyActive ? energyDist(t) : 0,
+      tempoD: ctx.target ? tempoDistance(t.tempo, ctx.target) : 0,
+      textureD: textureScore(t),
       i,
     }))
-    .sort((a, b) => a.tempoD - b.tempoD || a.energyD - b.energyD || a.i - b.i)
+    .sort((a, b) => a.tempoD - b.tempoD || a.textureD - b.textureD || a.i - b.i)
     .map((x) => x.t);
-  return [...head, ...ranked];
+  return { ranked: [...head, ...ranked], features };
+}
+
+// ---------------------------------------------------------------------------
+// Flow sequencing
+//
+// A playlist is a sequence, not a set: order the final list as a greedy
+// minimum-transition-cost path over energy, tempo, and harmonic (Camelot)
+// compatibility. Applied when no tempo target dictates a cadence-first order.
+// ---------------------------------------------------------------------------
+
+// Camelot wheel numbers indexed by Spotify pitch class (0=C..11=B).
+const CAMELOT_MAJOR = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
+const CAMELOT_MINOR = [5, 12, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10];
+
+function camelotPenalty(a: AudioFeatures | undefined, b: AudioFeatures | undefined): number {
+  if (!a || !b || a.key < 0 || b.key < 0) return 0.4; // unknown key: mild penalty
+  const numA = (a.mode === 1 ? CAMELOT_MAJOR : CAMELOT_MINOR)[a.key];
+  const numB = (b.mode === 1 ? CAMELOT_MAJOR : CAMELOT_MINOR)[b.key];
+  if (numA === numB) return a.mode === b.mode ? 0 : 0.15; // perfect / mood swap
+  const step = Math.min(Math.abs(numA - numB), 12 - Math.abs(numA - numB));
+  if (step === 1 && a.mode === b.mode) return 0.2; // energy shift ±1
+  return 1;
+}
+
+// Normalize BPM into a comparable "mix tempo" band (half/double-time fold).
+// Non-positive tempo (failed beat detection) must return null — feeding 0
+// into the fold loop would spin forever.
+function mixTempo(bpm: number | undefined): number | null {
+  if (bpm == null || bpm <= 0 || !Number.isFinite(bpm)) return null;
+  let t = bpm;
+  while (t >= 140) t /= 2;
+  while (t < 70) t *= 2;
+  return t;
+}
+
+function transitionCost(
+  a: SpotifyTrack,
+  b: SpotifyTrack,
+  features: Map<string, AudioFeatures>
+): number {
+  const fa = features.get(a.id);
+  const fb = features.get(b.id);
+  const energyDelta =
+    fa && fb ? Math.abs(fa.energy - fb.energy) : 0.3;
+  const ta = mixTempo(a.tempo);
+  const tb = mixTempo(b.tempo);
+  // The fold is circular: 139 and 141 BPM land at opposite band edges, so take
+  // the best of direct/half/double readings (same trick as tempoDistance).
+  const tempoDelta =
+    ta !== null && tb !== null
+      ? Math.min(
+          1,
+          Math.min(Math.abs(ta - tb), Math.abs(ta * 2 - tb), Math.abs(ta - tb * 2)) / 40
+        )
+      : 0.3;
+  return 0.45 * energyDelta + 0.3 * tempoDelta + 0.25 * camelotPenalty(fa, fb);
+}
+
+function sequenceForFlow(
+  tracks: SpotifyTrack[],
+  features: Map<string, AudioFeatures>
+): SpotifyTrack[] {
+  if (tracks.length < 5) return tracks;
+  const known = tracks.filter((t) => features.has(t.id)).length;
+  if (known < tracks.length / 2) return tracks; // not enough signal to sequence
+  // Greedy nearest-neighbor path anchored on the best-fit (first-ranked) track.
+  const remaining = tracks.slice(1);
+  const path = [tracks[0]];
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestCost = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const cost = transitionCost(path[path.length - 1], remaining[i], features);
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestIdx = i;
+      }
+    }
+    path.push(remaining.splice(bestIdx, 1)[0]);
+  }
+  return path;
+}
+
+// One track per primary artist keeps a 20-track playlist from reading as
+// repetitive; backfill with capped-out tracks only if the pool runs short.
+function capOnePerArtist(tracks: SpotifyTrack[], limit: number): SpotifyTrack[] {
+  const seen = new Set<string>();
+  const kept: SpotifyTrack[] = [];
+  const overflow: SpotifyTrack[] = [];
+  for (const t of tracks) {
+    const key = t.artists[0]?.id ?? t.id;
+    if (seen.has(key)) {
+      overflow.push(t);
+    } else {
+      seen.add(key);
+      kept.push(t);
+    }
+    if (kept.length >= limit) break;
+  }
+  return kept.length >= limit ? kept : [...kept, ...overflow].slice(0, limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +640,7 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
         ? v.filter((x): x is string => typeof x === "string").slice(0, max)
         : [];
     return {
-      artists: strings(parsed.artists, 8),
+      artists: strings(parsed.artists, 14),
       genres: strings(parsed.genres, 3),
       keywords: strings(parsed.keywords, 2),
       tracks: strings(parsed.tracks, 6),
@@ -526,7 +691,7 @@ async function resolveAndRank(
   neighborhood: Neighborhood,
   opts: ResolveOptions
 ): Promise<SpotifyTrack[]> {
-  const artistQueries = neighborhood.artists.map(cleanQuery).filter(Boolean).slice(0, 8);
+  const artistQueries = neighborhood.artists.map(cleanQuery).filter(Boolean).slice(0, 12);
   const genreQueries = neighborhood.genres.map(cleanQuery).filter(Boolean).slice(0, 3);
   const keywordQueries = neighborhood.keywords.map(cleanQuery).filter(Boolean).slice(0, 2);
 
@@ -631,23 +796,23 @@ Name real artists whose actual music delivers this vibe. Rules:
 - An artist's most popular tracks are often their mellowest — when the description implies a specific energy, tempo, or intensity, the "tracks" list must name individual songs famous for exactly that quality, not the artist's biggest hits.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
-{"artists": ["...8 artists..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."]}`
+{"artists": ["...12 distinct artists spanning the neighborhood..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."]}`
   );
 
   if (neighborhood && (neighborhood.artists.length > 0 || neighborhood.genres.length > 0)) {
     // Claude's exemplar songs lead the playlist — they carry the within-catalog
     // mood (energy/tempo/intensity) that artist-level search can't express.
     const exemplars = await resolveExemplarTracks(accessToken, neighborhood.tracks ?? []);
-    // With an active tempo/energy intent, over-fetch so the feature-based
-    // re-rank selects from a wider pool instead of reordering a popularity cut.
-    const intentActive = tempoTarget !== null || Math.abs(filters.energy - 50) > 10;
+    // Always over-fetch: the feature-based re-rank and the one-per-artist cap
+    // both need a wider pool than the final 20 to select from.
     const tracks = await resolveAndRank(accessToken, neighborhood, {
       tierZeroTracks: exemplars,
       anchorPopularity: filters.popularity,
       tierOneCap: 6,
-      limit: intentActive ? 32 : 20,
+      limit: 32,
     });
-    if (tracks.length > 0) return { tracks, degraded: false };
+    if (tracks.length > 0)
+      return { tracks, degraded: false, exemplarIds: exemplars.map((t) => t.id) };
   }
 
   // Last resort: plain keyword search

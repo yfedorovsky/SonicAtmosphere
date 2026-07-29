@@ -106,6 +106,8 @@ export function ReplaceWeakestPanel({ driftScores }: ReplaceWeakestPanelProps) {
         regen: "1",
       });
       if (filters.moods.length > 0) params.set("moods", filters.moods.join(","));
+      // Fit-ranked order, not flow-sequenced: we take the top N as replacements.
+      params.set("sequence", "0");
 
       const res = await fetch(`/api/spotify/search?${params}`);
       if (!res.ok) {

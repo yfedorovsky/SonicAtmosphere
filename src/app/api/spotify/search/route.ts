@@ -73,11 +73,14 @@ export async function GET(request: NextRequest) {
   }
 
   const source = accessToken ? "user-token" : "client-credentials";
+  // sequence=0 keeps fit-ranked order for callers that consume the list
+  // prefix as best-N candidates (replace weakest).
   const { tracks, degraded } = await generateRecommendations(
     token,
     query,
     type as GeneratorMode,
-    filters
+    filters,
+    { sequence: request.nextUrl.searchParams.get("sequence") !== "0" }
   );
 
   // If recommendations returned empty, fall back to keyword search
