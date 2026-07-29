@@ -57,36 +57,78 @@ async function spotifyFetch(
   return res;
 }
 
+// In-process cache for Spotify search responses. Search is the overwhelming
+// majority of the app's Spotify calls (one generation fires ~25), and the same
+// artist/genre/playlist queries recur constantly across regenerations — so
+// caching them within a warm serverless instance sharply cuts quota burn (a
+// dev-mode app can hit Spotify's daily QUOTA_EXCEEDED). Catalog results are
+// effectively token-independent and stable hour to hour.
+//
+// Critically, only SUCCESSFUL responses are cached: a rate-limited/error
+// response (429/403) must not poison the cache with an empty result.
+const searchCacheStore = globalThis as unknown as {
+  __saSearchCache?: Map<string, { data: unknown; expiresAt: number }>;
+};
+const SEARCH_CACHE_TTL_MS = 60 * 60 * 1000; // 1h; instance usually recycles first
+const SEARCH_CACHE_MAX = 800;
+
+function searchCache(): Map<string, { data: unknown; expiresAt: number }> {
+  return (searchCacheStore.__saSearchCache ??= new Map());
+}
+
+async function cachedSearch<T>(
+  key: string,
+  fetcher: () => Promise<{ ok: boolean; value: T }>
+): Promise<T> {
+  const cache = searchCache();
+  const hit = cache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.data as T;
+
+  const { ok, value } = await fetcher();
+  if (ok) {
+    if (cache.size >= SEARCH_CACHE_MAX) {
+      const oldest = cache.keys().next().value; // Map preserves insertion order
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, { data: value, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
+  }
+  return value;
+}
+
 export async function searchTracks(
   query: string,
   accessToken: string,
   limit = 10
 ): Promise<SpotifyTrack[]> {
-  // Spotify search API max is 10 per request — paginate for more
-  const perPage = Math.min(limit, 10);
-  const pages = Math.ceil(limit / perPage);
-  const allTracks: SpotifyTrack[] = [];
+  return cachedSearch(`t:${limit}:${query}`, async () => {
+    // Spotify search API max is 10 per request — paginate for more
+    const perPage = Math.min(limit, 10);
+    const pages = Math.ceil(limit / perPage);
+    const allTracks: SpotifyTrack[] = [];
+    let gotOk = false;
 
-  for (let page = 0; page < pages; page++) {
-    const params = new URLSearchParams({
-      q: query,
-      type: "track",
-      limit: String(perPage),
-      offset: String(page * perPage),
-    });
+    for (let page = 0; page < pages; page++) {
+      const params = new URLSearchParams({
+        q: query,
+        type: "track",
+        limit: String(perPage),
+        offset: String(page * perPage),
+      });
 
-    const res = await spotifyFetch(`/search?${params}`, accessToken);
-    if (!res.ok) break;
+      const res = await spotifyFetch(`/search?${params}`, accessToken);
+      if (!res.ok) break; // 429/403: return what we have, but do not cache it
+      gotOk = true;
 
-    const data = await res.json();
-    const tracks = (data.tracks?.items || []).map(mapSpotifyTrack);
-    allTracks.push(...tracks);
+      const data = await res.json();
+      const tracks = (data.tracks?.items || []).map(mapSpotifyTrack);
+      allTracks.push(...tracks);
 
-    // Stop if we got fewer than requested (no more results)
-    if (tracks.length < perPage) break;
-  }
+      // Stop if we got fewer than requested (no more results)
+      if (tracks.length < perPage) break;
+    }
 
-  return allTracks.slice(0, limit);
+    return { ok: gotOk, value: allTracks.slice(0, limit) };
+  });
 }
 
 export async function searchArtists(
@@ -287,21 +329,24 @@ export async function searchPlaylistNames(
   accessToken: string,
   limit = 8
 ): Promise<{ name: string; description: string }[]> {
-  const params = new URLSearchParams({
-    q: query,
-    type: "playlist",
-    limit: String(Math.min(limit, 10)),
+  return cachedSearch(`p:${limit}:${query}`, async () => {
+    const params = new URLSearchParams({
+      q: query,
+      type: "playlist",
+      limit: String(Math.min(limit, 10)),
+    });
+    const res = await spotifyFetch(`/search?${params}`, accessToken);
+    if (!res.ok) return { ok: false, value: [] };
+    const data = await res.json();
+    const value = (data.playlists?.items || [])
+      .filter(Boolean)
+      .map((p: { name?: string; description?: string }) => ({
+        name: p.name || "",
+        description: p.description || "",
+      }))
+      .filter((p: { name: string }) => p.name);
+    return { ok: true, value };
   });
-  const res = await spotifyFetch(`/search?${params}`, accessToken);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data.playlists?.items || [])
-    .filter(Boolean)
-    .map((p: { name?: string; description?: string }) => ({
-      name: p.name || "",
-      description: p.description || "",
-    }))
-    .filter((p: { name: string }) => p.name);
 }
 
 // App-only token for search when no user is connected. Cached in-process

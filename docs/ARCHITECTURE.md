@@ -43,6 +43,8 @@ How Sonic Atmosphere is put together: identity, data model, the generation pipel
 
 Token resolution first: connected user token (DB, auto-refresh) → else app-only client-credentials token (cached in-process with explicit expiry — Next's fetch cache serves stale entries while revalidating, which handed out expired tokens). **Every mode works with the app-only token**; generation quality does not depend on a Spotify login.
 
+**Search caching**: search is ~90% of the app's Spotify calls (one generation fires ~25, and the same `artist:"…"`/`genre:"…"`/playlist queries recur across regenerations), so `searchTracks`/`searchPlaylistNames` cache successful responses in-process (`__saSearchCache`, 1h TTL, LRU-capped). A dev-mode app has a fixed daily Spotify quota (429 `QUOTA_EXCEEDED`); caching sharply cuts burn within a warm instance. **Only 2xx responses are cached** — a 429/403 must never poison the cache with an empty result. (Cross-instance/cross-cold-start persistence would need a shared store; the in-process cache covers the burst pattern that dominates consumption.)
+
 **All four modes run one grounded LLM→search pipeline** (`askNeighborhood` + `resolveAndRank`). Each mode first attempts the native `/recommendations` path (works only for grandfathered apps; typically 403), then:
 
 1. **Grounding** — gather signals this app tier can still read: the relevant artist's own catalog (`artist:"…"` search) and the *names* of public playlists matching the song/artist/vibe (playlist metadata is searchable even though playlist items are 403). These describe the actual style so the model never guesses blind.
