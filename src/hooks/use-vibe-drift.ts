@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { SpotifyTrack } from "@/types";
 import type { AudioFeatures } from "@/lib/spotify";
 
@@ -22,22 +22,40 @@ interface VibeDriftResult {
 
 const DRIFT_THRESHOLD = 0.35; // Flag tracks whose normalized distance exceeds this
 
+// The route caps a single request at this many ids.
+const FETCH_CHUNK = 100;
+
 export function useVibeDrift(tracks: SpotifyTrack[]): VibeDriftResult {
   const [features, setFeatures] = useState<Record<string, AudioFeatures>>({});
   const [isLoading, setIsLoading] = useState(false);
+  // Ids already asked for this session. The provider legitimately has no data
+  // for some tracks and omits them from a 200 response — without this marker
+  // every partial response would re-trigger the effect and loop the fetch.
+  const requestedIds = useRef<Set<string>>(new Set());
 
   const fetchFeatures = useCallback(async (trackIds: string[]) => {
     if (trackIds.length === 0) return;
+    for (const id of trackIds) requestedIds.current.add(id);
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/spotify/audio-features?ids=${trackIds.join(",")}`);
-      if (res.ok) {
+      for (let i = 0; i < trackIds.length; i += FETCH_CHUNK) {
+        const chunk = trackIds.slice(i, i + FETCH_CHUNK);
+        const res = await fetch(`/api/spotify/audio-features?ids=${chunk.join(",")}`);
+        if (!res.ok) {
+          // Rate limited or transient failure — allow a later retry, but only
+          // when something else (e.g. the track list) changes; a failed fetch
+          // never re-triggers the effect by itself.
+          for (const id of chunk) requestedIds.current.delete(id);
+          continue;
+        }
         const data = await res.json();
         const newFeatures: Record<string, AudioFeatures> = {};
         for (const f of data.audio_features || []) {
           if (f?.id) newFeatures[f.id] = f;
         }
-        setFeatures((prev) => ({ ...prev, ...newFeatures }));
+        if (Object.keys(newFeatures).length > 0) {
+          setFeatures((prev) => ({ ...prev, ...newFeatures }));
+        }
       }
     } catch {
       // Fail silently — drift detection is optional enhancement
@@ -46,11 +64,11 @@ export function useVibeDrift(tracks: SpotifyTrack[]): VibeDriftResult {
     }
   }, []);
 
-  // Fetch audio features for new tracks
+  // Fetch audio features for tracks we haven't asked about yet
   useEffect(() => {
     const missingIds = tracks
       .map((t) => t.id)
-      .filter((id) => !features[id]);
+      .filter((id) => !features[id] && !requestedIds.current.has(id));
 
     if (missingIds.length > 0) {
       fetchFeatures(missingIds);

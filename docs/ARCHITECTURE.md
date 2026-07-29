@@ -51,6 +51,8 @@ Token resolution first: connected user token (DB, auto-refresh) → else app-onl
 
 Per mode: **Song** leads with the seed itself (seed resolution prefers the most popular of the top text matches — cover-farm defense); **Vibe** is grounded by playlist names matching the vibe keywords; **Artist** is a grounded artist radio (own catalog at tier 0 + similar artists); **Genre** has Claude name the genre's canon and blends it with `genre:"…"` field search.
 
+**Tempo targeting** (`extractTempoTarget` → `annotateAndRankByTempo`): an explicit BPM in the prompt ("at 128 BPM", "170–180 BPM") or a workout keyword (running, cycling/spin, HIIT/bootcamp, power walking) sets a target window. The window is passed as a hint into the neighborhood prompt, and after resolution every track is annotated with its BPM (from ReccoBeats — see below) and stable-sorted by distance to the window, where half- and double-time readings count as equivalent (an 87 BPM groove locks to a 174 SPM stride) and unknown tempo prices as a moderate fixed distance. Nothing is dropped — tempo data has gaps, and a shorter playlist is worse than an imperfect tail. Song mode keeps its seed pinned first.
+
 Quality was validated by an adversarial judge panel across five genres (psych-funk, IDM, americana, hip-hop, classical) and cross-checked against last.fm similar-artist data. Cost: one Opus call per generation (fraction of a cent), bounded by the search rate limits.
 
 Every generator call logs a `generation_runs` row (fire-and-forget via `next/server after()`); import matching (`type=track`) is exempt so pasted lists don't pollute prompt history.
@@ -97,7 +99,7 @@ Probed 2026-07 with this app's credentials:
 | `GET /artists/{id}/top-tracks` | ❌ 403 |
 | Artist `genres` field | ❌ always absent |
 
-Consequences: vibe-drift scoring silently degrades to popularity distance (the hook fails soft), and all similarity features route through search + Claude. If the app passes Spotify's extended-quota review these endpoints may light up again — the code already prefers them when they respond.
+Consequences: all similarity features route through search + Claude, and audio features come from outside Spotify entirely — `src/lib/audio-features.ts` fetches them from the free ReccoBeats API keyed by Spotify track id (in-process cache, batched, fail-soft), serving `/api/spotify/audio-features` (IP rate-limited, no Spotify auth), tempo annotation in the generation pipeline, and the client vibe-drift hook unchanged. If the app passes Spotify's extended-quota review the native endpoints may light up again — the code already prefers them when they respond.
 
 ## Security notes
 

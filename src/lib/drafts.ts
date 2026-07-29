@@ -73,6 +73,7 @@ function sanitizeTrack(t: SpotifyTrack): SpotifyTrack {
       spotify: typeof t.external_urls?.spotify === "string" ? t.external_urls.spotify : "",
     },
     popularity: typeof t.popularity === "number" ? t.popularity : 0,
+    ...(typeof t.tempo === "number" && Number.isFinite(t.tempo) ? { tempo: t.tempo } : {}),
   };
 }
 

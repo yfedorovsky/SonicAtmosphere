@@ -10,6 +10,7 @@ import {
   type RecommendationParams,
 } from "./spotify";
 import type { SpotifyTrack, GeneratorMode, FilterValues } from "@/types";
+import { fetchAudioFeatures } from "@/lib/audio-features";
 
 // Map vibe keywords to Spotify genre seeds
 const VIBE_TO_GENRES: Record<string, string[]> = {
@@ -239,18 +240,127 @@ export async function generateRecommendations(
   mode: GeneratorMode,
   filters: FilterValues
 ): Promise<SpotifyTrack[]> {
+  // Only free-text modes can express a workout/tempo intent. Song and artist
+  // prompts are titles/names — "Born to Run" is not a running request.
+  const tempoTarget =
+    mode === "vibe" || mode === "genre" ? extractTempoTarget(prompt) : null;
+  let tracks: SpotifyTrack[];
   switch (mode) {
     case "vibe":
-      return vibeRecommendations(accessToken, prompt, filters);
+      tracks = await vibeRecommendations(accessToken, prompt, filters, tempoTarget);
+      break;
     case "song":
-      return songRecommendations(accessToken, prompt, filters);
+      tracks = await songRecommendations(accessToken, prompt, filters);
+      break;
     case "artist":
-      return artistRecommendations(accessToken, prompt, filters);
+      tracks = await artistRecommendations(accessToken, prompt, filters);
+      break;
     case "genre":
-      return genreRecommendations(accessToken, prompt, filters);
+      tracks = await genreRecommendations(accessToken, prompt, filters, tempoTarget);
+      break;
     default:
-      return searchTracks(prompt, accessToken, 20);
+      tracks = await searchTracks(prompt, accessToken, 20);
   }
+  // Song mode leads with the seed itself — keep it in front regardless of tempo.
+  return annotateAndRankByTempo(tracks, tempoTarget, mode === "song");
+}
+
+// ---------------------------------------------------------------------------
+// Tempo targeting
+//
+// Spotify's /audio-features (tempo) is 403 for this app tier; BPM comes from
+// an external provider (lib/audio-features). Workout prompts imply a cadence:
+// an explicit "175 BPM" always wins, otherwise activity keywords map to the
+// tempo windows those workouts are actually programmed around.
+// ---------------------------------------------------------------------------
+
+interface TempoTarget {
+  min: number;
+  max: number;
+  label: string;
+}
+
+const TEMPO_PRESETS: { pattern: RegExp; target: TempoTarget }[] = [
+  {
+    pattern: /\brun(?:ning|s)?\b|\bjog(?:ging)?\b|\bmarathon\b|\btreadmill\b|\b5k\b|\b10k\b/,
+    target: { min: 150, max: 180, label: "running" },
+  },
+  {
+    pattern: /\bcycling\b|\bspin(?:ning)? class\b|\bpeloton\b|\bsoulcycle\b|\bindoor cycling\b/,
+    target: { min: 118, max: 136, label: "cycling" },
+  },
+  {
+    pattern: /\bhiit\b|\bbootcamp\b|\borange\s?theory\b|\botf\b|\bbarry'?s\b|\bcrossfit\b|\bcircuit training\b|\binterval training\b/,
+    target: { min: 128, max: 152, label: "HIIT" },
+  },
+  {
+    pattern: /\bpower walk(?:ing)?\b|\bbrisk walk(?:ing)?\b/,
+    target: { min: 115, max: 135, label: "walking" },
+  },
+];
+
+function extractTempoTarget(prompt: string): TempoTarget | null {
+  const p = prompt.toLowerCase();
+  const clamp = (n: number) => Math.min(220, Math.max(40, n));
+
+  const range = p.match(/(\d{2,3})\s*(?:-|–|—|to)\s*(\d{2,3})\s*bpm\b/);
+  if (range) {
+    const lo = clamp(Number(range[1]));
+    const hi = clamp(Number(range[2]));
+    if (lo <= hi) return { min: lo, max: hi, label: `${lo}–${hi} BPM` };
+  }
+  const single = p.match(/(\d{2,3})\s*bpm\b/);
+  if (single) {
+    const bpm = clamp(Number(single[1]));
+    return { min: bpm - 6, max: bpm + 6, label: `~${bpm} BPM` };
+  }
+  for (const { pattern, target } of TEMPO_PRESETS) {
+    if (pattern.test(p)) return target;
+  }
+  return null;
+}
+
+// Distance from the target window, taking the best of direct, half-time, and
+// double-time readings — an 87 BPM groove phase-locks to a 174 steps-per-minute
+// stride just as well. Unknown tempo prices as a moderate fixed distance so a
+// confirmed near-miss still outranks a mystery, but a far miss doesn't.
+const UNKNOWN_TEMPO_DISTANCE = 15;
+
+function tempoDistance(bpm: number | undefined, target: TempoTarget): number {
+  if (bpm == null) return UNKNOWN_TEMPO_DISTANCE;
+  const dist = (v: number) =>
+    v < target.min ? target.min - v : v > target.max ? v - target.max : 0;
+  return Math.min(dist(bpm), dist(bpm * 2), dist(bpm / 2));
+}
+
+function tempoHint(target: TempoTarget | null): string {
+  if (!target) return "";
+  return `\nTarget tempo: ${target.min}–${target.max} BPM (${target.label}). Strongly prefer artists and subgenres whose music actually lives in or near that range — half-time/double-time equivalents count.`;
+}
+
+// Annotate every track with BPM when known; with an active target, stable-sort
+// matches first, unknowns in the middle, misses last. Nothing is dropped —
+// tempo data has gaps and a shorter playlist is worse than an imperfect tail.
+async function annotateAndRankByTempo(
+  tracks: SpotifyTrack[],
+  target: TempoTarget | null,
+  pinFirst: boolean
+): Promise<SpotifyTrack[]> {
+  if (tracks.length === 0) return tracks;
+  const features = await fetchAudioFeatures(tracks.map((t) => t.id));
+  const annotated = tracks.map((t) => {
+    const f = features.get(t.id);
+    return f ? { ...t, tempo: Math.round(f.tempo) } : t;
+  });
+  if (!target) return annotated;
+
+  const head = pinFirst ? annotated.slice(0, 1) : [];
+  const rest = pinFirst ? annotated.slice(1) : annotated;
+  const ranked = rest
+    .map((t, i) => ({ t, dist: tempoDistance(t.tempo, target), i }))
+    .sort((a, b) => a.dist - b.dist || a.i - b.i)
+    .map((x) => x.t);
+  return [...head, ...ranked];
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +511,8 @@ async function resolveAndRank(
 async function vibeRecommendations(
   accessToken: string,
   prompt: string,
-  filters: FilterValues
+  filters: FilterValues,
+  tempoTarget: TempoTarget | null = null
 ): Promise<SpotifyTrack[]> {
   // Native recommendations first — best quality where the app still has access
   const nativeTracks = await nativeVibeRecommendations(accessToken, prompt, filters);
@@ -427,7 +538,7 @@ ${playlistNames.length ? `Names of real public playlists matching these keywords
 Name real artists whose actual music delivers this vibe. Rules:
 - If the description references a specific song or artist, anchor on that artist and their closest peers.
 - Interpret sensory or scene-setting words ("coffee aroma", "rainy night") as a MOOD, never literally — do not pick novelty, background-music, or coffee-shop-compilation acts.
-- Prefer credible artists a music critic would name; never content-farm, tribute, karaoke, or "study beats" channel acts.
+- Prefer credible artists a music critic would name; never content-farm, tribute, karaoke, or "study beats" channel acts.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
 {"artists": ["...8 artists..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."]}`
@@ -698,7 +809,8 @@ Respond ONLY with valid JSON in this exact format, no other text:
 async function genreRecommendations(
   accessToken: string,
   prompt: string,
-  filters: FilterValues
+  filters: FilterValues,
+  tempoTarget: TempoTarget | null = null
 ): Promise<SpotifyTrack[]> {
   const genres = prompt
     .toLowerCase()
@@ -724,7 +836,7 @@ async function genreRecommendations(
   // genre:"..." field search alone surfaces obscure text matches — have
   // Claude name the genre's defining artists and blend both.
   const neighborhood = await askNeighborhood(
-    `Name the artists that define ${genres.join(" + ")} as a genre — a mix of the canonical acts and strong current ones.
+    `Name the artists that define ${genres.join(" + ")} as a genre — a mix of the canonical acts and strong current ones.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
 {"artists": ["...8 artists..."], "genres": ${JSON.stringify(genres)}, "keywords": []}`

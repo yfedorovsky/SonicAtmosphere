@@ -37,21 +37,25 @@ export function SonicSlider({
           {value}%
         </span>
       </div>
-      <div className="relative h-1.5 bg-surface-container rounded-full overflow-hidden">
-        <div
-          className={cn("absolute h-full rounded-full transition-all", colorClasses[color])}
-          style={{ width: `${value}%` }}
+      {/* The native range input fills a tall-enough hit area directly over the
+          styled track — no offset hacks, so pointer and touch input always land. */}
+      <div className="relative h-6 flex items-center">
+        <div className="h-1.5 w-full bg-surface-container rounded-full overflow-hidden">
+          <div
+            className={cn("h-full rounded-full transition-all", colorClasses[color])}
+            style={{ width: `${value}%` }}
+          />
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={value}
+          aria-label={label}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="absolute inset-0 h-full w-full opacity-0 cursor-pointer"
         />
       </div>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="absolute inset-0 w-full opacity-0 cursor-pointer"
-        style={{ position: "relative", marginTop: "-20px", height: "20px" }}
-      />
     </div>
   );
 }

@@ -12,6 +12,8 @@ export interface SpotifyTrack {
   preview_url: string | null;
   external_urls: { spotify: string };
   popularity: number;
+  /** Beats per minute, when known (sourced outside Spotify — see lib/audio-features). */
+  tempo?: number;
 }
 
 export interface ParsedTrackLine {

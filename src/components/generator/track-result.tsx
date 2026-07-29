@@ -76,9 +76,14 @@ export function TrackResult({ track, tags, viewMode = "grid" }: TrackResultProps
             <p className="text-xs text-on-surface-variant truncate mt-0.5">
               {track.artists.map((a) => a.name).join(", ")}
             </p>
-            {tags && tags.length > 0 && (
-              <div className="flex gap-1.5 mt-2">
-                {tags.map((tag) => (
+            {(track.tempo != null || (tags && tags.length > 0)) && (
+              <div className="flex gap-1.5 mt-2 flex-wrap">
+                {track.tempo != null && (
+                  <span className="text-[10px] tabular-nums px-2 py-0.5 rounded bg-white/5 text-on-surface-variant">
+                    {track.tempo} BPM
+                  </span>
+                )}
+                {tags?.map((tag) => (
                   <span
                     key={tag}
                     className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded bg-primary/20 text-primary"
@@ -177,8 +182,13 @@ export function TrackResult({ track, tags, viewMode = "grid" }: TrackResultProps
         )}
       </div>
 
-      {/* Duration + Add button */}
+      {/* BPM + Duration + Add button */}
       <div className="flex items-center gap-4 md:gap-6 shrink-0">
+        {track.tempo != null && (
+          <span className="text-xs text-on-surface-variant/60 tabular-nums hidden md:block">
+            {track.tempo} BPM
+          </span>
+        )}
         <span className="text-sm text-on-surface-variant/60 tabular-nums hidden sm:block">
           {formatDuration(track.duration_ms)}
         </span>

@@ -102,8 +102,11 @@ export function TrackRow({ track, index, onRemove, isLocked, onToggleLock, ratio
         {track.album.name}
       </span>
 
-      {/* Duration */}
+      {/* Duration (with BPM when known) */}
       <span className="text-right text-on-surface-variant text-sm font-headline hidden sm:block tabular-nums">
+        {track.tempo != null && (
+          <span className="text-on-surface-variant/50 text-xs mr-2">{track.tempo} BPM</span>
+        )}
         {formatDuration(track.duration_ms)}
       </span>
 
