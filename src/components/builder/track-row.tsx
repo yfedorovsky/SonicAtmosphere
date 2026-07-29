@@ -27,7 +27,9 @@ export function TrackRow({ track, index, onRemove, isLocked, onToggleLock, ratio
 
   return (
     <div className={cn(
-      "grid grid-cols-[3rem_3fr_2fr_1fr_5rem] gap-4 items-center px-6 py-3 rounded-xl transition-all duration-200 group cursor-grab active:cursor-grabbing",
+      // Hidden cells (album on <md, duration on <sm) leave the grid flow, so the
+      // template must shrink with them or the title column gets crushed to zero.
+      "grid grid-cols-[2.5rem_minmax(0,1fr)_4rem] sm:grid-cols-[3rem_3fr_1fr_5rem] md:grid-cols-[3rem_3fr_2fr_1fr_5rem] gap-2 sm:gap-4 items-center px-3 sm:px-6 py-3 rounded-xl transition-all duration-200 group cursor-grab active:cursor-grabbing",
       isCurrentlyPlaying ? "bg-primary/5" : isOutlier ? "bg-tertiary/5 border border-tertiary/15" : "hover:bg-white/5",
       isLocked && "ring-1 ring-secondary/20"
     )}>

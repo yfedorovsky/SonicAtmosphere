@@ -76,10 +76,11 @@ export function TrackTable() {
 
   return (
     <div className="space-y-2">
-      {/* Tracklist header with undo/redo */}
-      <div className="flex items-center justify-between mb-4">
+      {/* Tracklist header with undo/redo — wraps on narrow screens so the
+          action buttons can never force horizontal page scroll */}
+      <div className="flex flex-wrap items-center justify-between gap-y-3 mb-4">
         <h2 className="font-headline text-2xl font-bold">Tracklist</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {unexplained.length > 0 && (
             <button
               type="button"
@@ -120,7 +121,7 @@ export function TrackTable() {
       </div>
 
       {/* Table header */}
-      <div className="grid grid-cols-[3rem_3fr_2fr_1fr_5rem] gap-4 px-6 py-3 text-[11px] uppercase tracking-[0.15em] text-on-surface-variant/60 font-bold border-b border-white/5">
+      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_4rem] sm:grid-cols-[3rem_3fr_1fr_5rem] md:grid-cols-[3rem_3fr_2fr_1fr_5rem] gap-2 sm:gap-4 px-3 sm:px-6 py-3 text-[11px] uppercase tracking-[0.15em] text-on-surface-variant/60 font-bold border-b border-white/5">
         <span className="text-center">#</span>
         <span>Title</span>
         <span className="hidden md:block">Album</span>
