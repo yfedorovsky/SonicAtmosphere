@@ -298,6 +298,18 @@ export async function generateRecommendations(
   ) {
     tracks = sequenceForFlow(tracks, features);
   }
+  // BPM badges only make sense when tempo was the point (a workout/tempo
+  // prompt). Both feature providers report machine-detected double-time on
+  // many grooves, so showing BPM on a general playlist reads as wrong — strip
+  // it. Tempo has already done its job for sequencing above.
+  if (!tempoTarget) {
+    tracks = tracks.map((t) => {
+      if (t.tempo == null) return t;
+      const stripped = { ...t };
+      delete stripped.tempo;
+      return stripped;
+    });
+  }
   return { ...result, tracks };
 }
 
@@ -454,8 +466,25 @@ async function annotateAndRank(
 
   if (!ctx.target && !energyActive && !centroid) return { ranked: annotated, features };
 
-  const head = ctx.pinFirst ? annotated.slice(0, 1) : [];
-  const rest = ctx.pinFirst ? annotated.slice(1) : annotated;
+  // Texture gate: with a resolved exemplar centroid, drop candidates that are
+  // acoustically alien to it (e.g. a rap track mis-surfaced by genre:"hard bop"
+  // search). Only fires on tracks with known features, and never on exemplars
+  // or so many that the pool can't fill — a far-but-present track beats a hole.
+  const TEXTURE_GATE = 0.42;
+  const exemplarSet = new Set(ctx.exemplarIds);
+  const gated =
+    centroid && annotated.length > 24
+      ? annotated.filter(
+          (t) =>
+            exemplarSet.has(t.id) ||
+            !features.get(t.id) ||
+            centroidDist(t) <= TEXTURE_GATE
+        )
+      : annotated;
+  const pool = gated.length >= 20 ? gated : annotated;
+
+  const head = ctx.pinFirst ? pool.slice(0, 1) : [];
+  const rest = ctx.pinFirst ? pool.slice(1) : pool;
   // Tempo intent dominates; texture fit to exemplars and the explicit energy
   // dial share the second key; original (tier/popularity) order breaks ties.
   const textureScore = (t: SpotifyTrack): number => {
@@ -640,7 +669,7 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
         ? v.filter((x): x is string => typeof x === "string").slice(0, max)
         : [];
     return {
-      artists: strings(parsed.artists, 14),
+      artists: strings(parsed.artists, 16),
       genres: strings(parsed.genres, 3),
       keywords: strings(parsed.keywords, 2),
       tracks: strings(parsed.tracks, 6),
@@ -683,6 +712,12 @@ interface ResolveOptions {
   exclude?: SpotifyTrack[];
   // Cap on generic genre/keyword-search results — broad tags pull in filler.
   tierOneCap?: number;
+  // Max tracks per credited artist in the candidate pool (default 2). Set to 1
+  // when a downstream one-per-artist cap needs an artist-diverse pool to reach
+  // its target count. tierZeroTracks (exemplars) are exempt.
+  perArtistCap?: number;
+  // How many named artists to search (default 12).
+  artistLimit?: number;
   limit: number;
 }
 
@@ -691,7 +726,10 @@ async function resolveAndRank(
   neighborhood: Neighborhood,
   opts: ResolveOptions
 ): Promise<SpotifyTrack[]> {
-  const artistQueries = neighborhood.artists.map(cleanQuery).filter(Boolean).slice(0, 12);
+  const artistQueries = neighborhood.artists
+    .map(cleanQuery)
+    .filter(Boolean)
+    .slice(0, opts.artistLimit ?? 12);
   const genreQueries = neighborhood.genres.map(cleanQuery).filter(Boolean).slice(0, 3);
   const keywordQueries = neighborhood.keywords.map(cleanQuery).filter(Boolean).slice(0, 2);
 
@@ -740,6 +778,10 @@ async function resolveAndRank(
   );
 
   // Count every credited artist so features can't flood the list either.
+  // Exemplars (tierZeroTracks) are hand-picked mood anchors — exempt them so
+  // a tight per-artist cap can't evict them in favour of catalog filler.
+  const protectedIds = new Set((opts.tierZeroTracks ?? []).map((t) => t.id));
+  const perArtistCap = opts.perArtistCap ?? 2;
   const perArtist = new Map<string, number>();
   const candidates: SpotifyTrack[] = [];
   const tierOneCap = opts.tierOneCap ?? 4;
@@ -747,7 +789,8 @@ async function resolveAndRank(
   for (const { t, tier } of unique) {
     if (tier === 1 && tierOneSlots >= tierOneCap) continue;
     const keys = t.artists.length > 0 ? t.artists.map((a) => a.id) : [t.id];
-    if (keys.some((k) => (perArtist.get(k) ?? 0) >= 2)) continue;
+    const isExemplar = protectedIds.has(t.id);
+    if (!isExemplar && keys.some((k) => (perArtist.get(k) ?? 0) >= perArtistCap)) continue;
     for (const k of keys) perArtist.set(k, (perArtist.get(k) ?? 0) + 1);
     if (tier === 1) tierOneSlots += 1;
     candidates.push(t);
@@ -796,7 +839,7 @@ Name real artists whose actual music delivers this vibe. Rules:
 - An artist's most popular tracks are often their mellowest — when the description implies a specific energy, tempo, or intensity, the "tracks" list must name individual songs famous for exactly that quality, not the artist's biggest hits.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
-{"artists": ["...12 distinct artists spanning the neighborhood..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."]}`
+{"artists": ["...16 distinct artists spanning the neighborhood — enough to fill a 20-track playlist with no repeats..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."]}`
   );
 
   if (neighborhood && (neighborhood.artists.length > 0 || neighborhood.genres.length > 0)) {
@@ -809,7 +852,12 @@ Respond ONLY with valid JSON in this exact format, no other text:
       tierZeroTracks: exemplars,
       anchorPopularity: filters.popularity,
       tierOneCap: 6,
-      limit: 32,
+      // One track per artist in the pool + a wide artist search, so the final
+      // one-per-artist cap has ~20 distinct artists to reach and never has to
+      // backfill duplicates.
+      perArtistCap: 1,
+      artistLimit: 16,
+      limit: 40,
     });
     if (tracks.length > 0)
       return { tracks, degraded: false, exemplarIds: exemplars.map((t) => t.id) };

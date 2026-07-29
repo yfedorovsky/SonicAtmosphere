@@ -20,7 +20,11 @@ interface VibeDriftResult {
   isLoading: boolean;
 }
 
-const DRIFT_THRESHOLD = 0.35; // Flag tracks whose normalized distance exceeds this
+// Flag tracks whose normalized distance exceeds this. Kept deliberately high:
+// a genre-spanning "surprise me" playlist is legitimately broad, and flagging
+// a good-fit track (e.g. a correct-tempo mid-energy song among upbeat ones) as
+// a "vibe breaker" is worse than missing a true outlier.
+const DRIFT_THRESHOLD = 0.55;
 
 // The route caps a single request at this many ids.
 const FETCH_CHUNK = 100;
