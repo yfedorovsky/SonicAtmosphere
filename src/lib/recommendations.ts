@@ -234,35 +234,47 @@ function getAlternateQueries(prompt: string, moods: string[]): string[] {
   return queries.slice(0, 2);
 }
 
+// Every generator mode reports not just tracks but whether they came from the
+// real engine (native recommendations or the grounded LLM neighborhood) or a
+// plain-search fallback. Callers must not treat degraded results as engine
+// output: the UI warns the user, and living-playlist refresh skips rotation.
+export interface RecommendationResult {
+  tracks: SpotifyTrack[];
+  degraded: boolean;
+}
+
 export async function generateRecommendations(
   accessToken: string,
   prompt: string,
   mode: GeneratorMode,
   filters: FilterValues
-): Promise<SpotifyTrack[]> {
+): Promise<RecommendationResult> {
   // Only free-text modes can express a workout/tempo intent. Song and artist
   // prompts are titles/names — "Born to Run" is not a running request.
   const tempoTarget =
     mode === "vibe" || mode === "genre" ? extractTempoTarget(prompt) : null;
-  let tracks: SpotifyTrack[];
+  let result: RecommendationResult;
   switch (mode) {
     case "vibe":
-      tracks = await vibeRecommendations(accessToken, prompt, filters, tempoTarget);
+      result = await vibeRecommendations(accessToken, prompt, filters, tempoTarget);
       break;
     case "song":
-      tracks = await songRecommendations(accessToken, prompt, filters);
+      result = await songRecommendations(accessToken, prompt, filters);
       break;
     case "artist":
-      tracks = await artistRecommendations(accessToken, prompt, filters);
+      result = await artistRecommendations(accessToken, prompt, filters);
       break;
     case "genre":
-      tracks = await genreRecommendations(accessToken, prompt, filters, tempoTarget);
+      result = await genreRecommendations(accessToken, prompt, filters, tempoTarget);
       break;
     default:
-      tracks = await searchTracks(prompt, accessToken, 20);
+      result = { tracks: await searchTracks(prompt, accessToken, 20), degraded: false };
   }
   // Song mode leads with the seed itself — keep it in front regardless of tempo.
-  return annotateAndRankByTempo(tracks, tempoTarget, mode === "song");
+  return {
+    ...result,
+    tracks: await annotateAndRankByTempo(result.tracks, tempoTarget, mode === "song"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +405,10 @@ interface Neighborhood {
 // One JSON round trip to Claude. Opus-tier knowledge matters: obscure artists
 // misidentified by a smaller model produce a completely wrong playlist.
 async function askNeighborhood(content: string): Promise<Neighborhood | null> {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn("[recommendations] ANTHROPIC_API_KEY not set — LLM neighborhood unavailable");
+    return null;
+  }
   try {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await anthropic.messages.create({
@@ -401,9 +416,15 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
       max_tokens: 2000,
       messages: [{ role: "user", content }],
     });
-    if (response.stop_reason === "refusal") return null;
+    if (response.stop_reason === "refusal") {
+      console.error("[recommendations] neighborhood request refused by model");
+      return null;
+    }
     const textBlock = response.content.find((c) => c.type === "text");
-    if (!textBlock || textBlock.type !== "text") return null;
+    if (!textBlock || textBlock.type !== "text") {
+      console.error("[recommendations] neighborhood response had no text block");
+      return null;
+    }
     let jsonStr = textBlock.text.trim();
     if (jsonStr.startsWith("```")) {
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -513,10 +534,10 @@ async function vibeRecommendations(
   prompt: string,
   filters: FilterValues,
   tempoTarget: TempoTarget | null = null
-): Promise<SpotifyTrack[]> {
+): Promise<RecommendationResult> {
   // Native recommendations first — best quality where the app still has access
   const nativeTracks = await nativeVibeRecommendations(accessToken, prompt, filters);
-  if (nativeTracks.length > 0) return nativeTracks;
+  if (nativeTracks.length > 0) return { tracks: nativeTracks, degraded: false };
 
   // Grounding: names of public playlists matching the vibe keywords describe
   // how real curators label this mood.
@@ -550,11 +571,14 @@ Respond ONLY with valid JSON in this exact format, no other text:
       tierOneCap: 6,
       limit: 20,
     });
-    if (tracks.length > 0) return tracks;
+    if (tracks.length > 0) return { tracks, degraded: false };
   }
 
   // Last resort: plain keyword search
-  return keywordVibeSearch(accessToken, prompt, filters.moods, 20);
+  return {
+    tracks: await keywordVibeSearch(accessToken, prompt, filters.moods, 20),
+    degraded: true,
+  };
 }
 
 async function nativeVibeRecommendations(
@@ -626,13 +650,13 @@ export async function songRecommendations(
   accessToken: string,
   prompt: string,
   filters: FilterValues
-): Promise<SpotifyTrack[]> {
+): Promise<RecommendationResult> {
   const audioParams = extractAudioParams(prompt);
 
   // Search for the seed song. Among the top text matches, prefer the most
   // popular — canonical recordings beat cover-farm uploads of the same title.
   const seedResults = await searchTracks(prompt, accessToken, 3);
-  if (seedResults.length === 0) return [];
+  if (seedResults.length === 0) return { tracks: [], degraded: false };
   const seed = [...seedResults].sort((a, b) => b.popularity - a.popularity)[0];
 
   const seedTrackIds = seedResults.map((t) => t.id).slice(0, 2);
@@ -651,7 +675,7 @@ export async function songRecommendations(
     ...filterConstraints(audioParams),
     limit: 20,
   });
-  if (tracks.length > 0) return tracks;
+  if (tracks.length > 0) return { tracks, degraded: false };
 
   return similarBySeedTrack(accessToken, seed);
 }
@@ -659,7 +683,7 @@ export async function songRecommendations(
 async function similarBySeedTrack(
   accessToken: string,
   seed: SpotifyTrack
-): Promise<SpotifyTrack[]> {
+): Promise<RecommendationResult> {
   const primaryArtist = cleanQuery(seed.artists[0]?.name ?? "");
 
   // Grounding signals: the artist's own catalog and the names of playlists
@@ -703,7 +727,12 @@ Respond ONLY with valid JSON in this exact format, no other text:
   );
 
   if (!neighborhood) {
-    return [seed, ...artistTracks.filter((t) => t.id !== seed.id)].slice(0, 21);
+    // LLM unavailable: the seed artist's own catalog is the safest filler,
+    // but it isn't the similar-music neighborhood the user asked for.
+    return {
+      tracks: [seed, ...artistTracks.filter((t) => t.id !== seed.id)].slice(0, 21),
+      degraded: true,
+    };
   }
 
   const candidates = await resolveAndRank(accessToken, neighborhood, {
@@ -715,7 +744,7 @@ Respond ONLY with valid JSON in this exact format, no other text:
   });
 
   // Lead with the liked song itself so the playlist starts from it.
-  return [seed, ...candidates].slice(0, 21);
+  return { tracks: [seed, ...candidates].slice(0, 21), degraded: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -726,10 +755,12 @@ async function artistRecommendations(
   accessToken: string,
   prompt: string,
   filters: FilterValues
-): Promise<SpotifyTrack[]> {
+): Promise<RecommendationResult> {
   const artists = await searchArtists(prompt, accessToken, 1);
   if (artists.length === 0) {
-    return searchTracks(prompt, accessToken, 20);
+    // Unknown artist: raw text search is all that's left — flag it so the
+    // user isn't shown junk matches as if they were curated.
+    return { tracks: await searchTracks(prompt, accessToken, 20), degraded: true };
   }
   const artist = artists[0];
 
@@ -752,13 +783,16 @@ async function artistRecommendations(
     const allTracks = [...topTracks, ...recommended];
     if (allTracks.length > 5) {
       const seen = new Set<string>();
-      return allTracks
-        .filter((t) => {
-          if (seen.has(t.id)) return false;
-          seen.add(t.id);
-          return true;
-        })
-        .slice(0, 25);
+      return {
+        tracks: allTracks
+          .filter((t) => {
+            if (seen.has(t.id)) return false;
+            seen.add(t.id);
+            return true;
+          })
+          .slice(0, 25),
+        degraded: false,
+      };
     }
   }
 
@@ -791,7 +825,8 @@ Respond ONLY with valid JSON in this exact format, no other text:
   );
 
   const anchor = ownTracks[0]?.popularity ?? filters.popularity;
-  if (!neighborhood) return ownTracks.slice(0, 21);
+  // LLM unavailable: own catalog only — real tracks, but not the radio mix.
+  if (!neighborhood) return { tracks: ownTracks.slice(0, 21), degraded: true };
 
   const candidates = await resolveAndRank(accessToken, neighborhood, {
     tierZeroTracks: ownTracks,
@@ -799,7 +834,9 @@ Respond ONLY with valid JSON in this exact format, no other text:
     tierOneCap: 4,
     limit: 21,
   });
-  return candidates.length > 0 ? candidates : ownTracks.slice(0, 21);
+  return candidates.length > 0
+    ? { tracks: candidates, degraded: false }
+    : { tracks: ownTracks.slice(0, 21), degraded: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -811,14 +848,14 @@ async function genreRecommendations(
   prompt: string,
   filters: FilterValues,
   tempoTarget: TempoTarget | null = null
-): Promise<SpotifyTrack[]> {
+): Promise<RecommendationResult> {
   const genres = prompt
     .toLowerCase()
     .split(/[,;]+/)
     .map((g) => g.trim())
     .filter(Boolean)
     .slice(0, 3);
-  if (genres.length === 0) return [];
+  if (genres.length === 0) return { tracks: [], degraded: false };
 
   // Native recommendations first — works where the app still has access
   const tracks = await getRecommendations(accessToken, {
@@ -831,7 +868,7 @@ async function genreRecommendations(
     target_instrumentalness: filters.instrumentalness,
     limit: 20,
   });
-  if (tracks.length > 0) return tracks;
+  if (tracks.length > 0) return { tracks, degraded: false };
 
   // genre:"..." field search alone surfaces obscure text matches — have
   // Claude name the genre's defining artists and blend both.
@@ -847,7 +884,9 @@ Respond ONLY with valid JSON in this exact format, no other text:
     neighborhood ?? { artists: [], genres, keywords: [] },
     { anchorPopularity: filters.popularity, tierOneCap: 6, limit: 20 }
   );
-  if (resolved.length > 0) return resolved;
+  // Without the LLM's artists, genre:"..." field search alone surfaces
+  // obscure text matches — still degraded even when it returns tracks.
+  if (resolved.length > 0) return { tracks: resolved, degraded: neighborhood === null };
 
-  return searchTracks(genres.join(" "), accessToken, 20);
+  return { tracks: await searchTracks(genres.join(" "), accessToken, 20), degraded: true };
 }

@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import { refreshRules } from "@/db/schema";
 import { getDraftById, upsertDraft } from "@/lib/drafts";
 import { trackEvent } from "@/lib/events";
-import { generateRecommendations, keywordVibeSearch } from "@/lib/recommendations";
+import { generateRecommendations } from "@/lib/recommendations";
 import { getClientCredentialsToken } from "@/lib/spotify";
 import { getSpotifyTokenForUser } from "@/lib/spotify-auth";
 import type { SpotifyTrack } from "@/types";
@@ -77,10 +77,15 @@ export async function runRefresh(db: Db, spec: RefreshSpec): Promise<RefreshResu
   const token = userToken ?? (await getClientCredentialsToken());
   if (!token) return { ok: false, replaced: 0, reason: "No Spotify access" };
 
-  let candidates = await generateRecommendations(token, prompt, mode, filters);
-  if (candidates.length === 0) {
-    candidates = await keywordVibeSearch(token, prompt, filters.moods, 30);
+  const recommended = await generateRecommendations(token, prompt, mode, filters);
+  // Degraded candidates are plain keyword-search output (e.g. the LLM was
+  // unavailable). Rotating them into a living playlist trades curated tracks
+  // for junk — keep the current tracks and let the next run rotate them.
+  if (recommended.degraded) {
+    console.warn(`[refresh] draft ${spec.draftId}: AI engine unavailable — skipping rotation`);
+    return { ok: false, replaced: 0, reason: "AI engine unavailable — kept existing tracks" };
   }
+  const candidates = recommended.tracks;
 
   const existing = new Set(draft.tracks.map((t) => t.id));
   const pool = candidates.filter((t) => !existing.has(t.id));

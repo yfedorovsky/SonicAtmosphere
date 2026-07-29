@@ -113,6 +113,11 @@ export function ReplaceWeakestPanel({ driftScores }: ReplaceWeakestPanelProps) {
         throw new Error(data?.error || `Search failed (${res.status})`);
       }
       const data = await res.json();
+      // Degraded = plain-search fallback (AI engine down). Never swap curated
+      // tracks for those — keep the draft as-is and tell the user.
+      if (data.degraded) {
+        throw new Error("AI engine unavailable — kept your tracks. Try again in a minute.");
+      }
       const existingIds = new Set(currentDraft.tracks.map((t) => t.id));
       const candidates: SpotifyTrack[] = (data.tracks || []).filter(
         (t: SpotifyTrack) => !existingIds.has(t.id),
