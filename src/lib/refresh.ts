@@ -114,16 +114,23 @@ export async function runRefresh(db: Db, spec: RefreshSpec): Promise<RefreshResu
     if (idx >= 0) {
       newTracks.push(pool.splice(idx, 1)[0]);
       replaced += 1;
+    } else {
+      // No fitting fresh candidate — keep the existing track rather than
+      // dropping the slot, which would silently shrink the playlist over
+      // repeated refreshes.
+      newTracks.push(t);
     }
-    // No fitting candidate: the slot is dropped rather than repeating an artist.
   }
   if (replaced === 0) {
     return { ok: false, replaced: 0, reason: "No fresh suggestions found" };
   }
 
+  // Prune rationales only for tracks that actually left the playlist — tracks
+  // kept in place (keepers or unrotated) retain theirs.
+  const finalIds = new Set(newTracks.map((t) => t.id));
   const rationales = { ...draft.trackRationales };
-  for (const t of draft.tracks) {
-    if (!keepers.has(t.id)) delete rationales[t.id];
+  for (const id of Object.keys(rationales)) {
+    if (!finalIds.has(id)) delete rationales[id];
   }
 
   await upsertDraft(db, spec.userId, {

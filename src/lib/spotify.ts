@@ -68,12 +68,16 @@ async function spotifyFetch(
 // response (429/403) must not poison the cache with an empty result.
 const searchCacheStore = globalThis as unknown as {
   __saSearchCache?: Map<string, { data: unknown; expiresAt: number }>;
+  __saSearchInflight?: Map<string, Promise<unknown>>;
 };
 const SEARCH_CACHE_TTL_MS = 60 * 60 * 1000; // 1h; instance usually recycles first
 const SEARCH_CACHE_MAX = 800;
 
 function searchCache(): Map<string, { data: unknown; expiresAt: number }> {
   return (searchCacheStore.__saSearchCache ??= new Map());
+}
+function searchInflight(): Map<string, Promise<unknown>> {
+  return (searchCacheStore.__saSearchInflight ??= new Map());
 }
 
 async function cachedSearch<T>(
@@ -84,15 +88,30 @@ async function cachedSearch<T>(
   const hit = cache.get(key);
   if (hit && hit.expiresAt > Date.now()) return hit.data as T;
 
-  const { ok, value } = await fetcher();
-  if (ok) {
-    if (cache.size >= SEARCH_CACHE_MAX) {
-      const oldest = cache.keys().next().value; // Map preserves insertion order
-      if (oldest !== undefined) cache.delete(oldest);
+  // Coalesce concurrent identical searches into one Spotify call — the daily
+  // quota is the binding resource, and bursts (cron + user, rapid regenerate)
+  // otherwise fire N duplicate requests before the first one populates.
+  const inflight = searchInflight();
+  const pending = inflight.get(key);
+  if (pending) return pending as Promise<T>;
+
+  const run = (async () => {
+    const { ok, value } = await fetcher();
+    if (ok) {
+      if (cache.size >= SEARCH_CACHE_MAX) {
+        const oldest = cache.keys().next().value; // Map preserves insertion order
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+      cache.set(key, { data: value, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
     }
-    cache.set(key, { data: value, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
+    return value;
+  })();
+  inflight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    inflight.delete(key); // never sticky — a rejection frees the key for retry
   }
-  return value;
 }
 
 export async function searchTracks(
@@ -105,7 +124,7 @@ export async function searchTracks(
     const perPage = Math.min(limit, 10);
     const pages = Math.ceil(limit / perPage);
     const allTracks: SpotifyTrack[] = [];
-    let gotOk = false;
+    let sawError = false;
 
     for (let page = 0; page < pages; page++) {
       const params = new URLSearchParams({
@@ -116,8 +135,10 @@ export async function searchTracks(
       });
 
       const res = await spotifyFetch(`/search?${params}`, accessToken);
-      if (!res.ok) break; // 429/403: return what we have, but do not cache it
-      gotOk = true;
+      if (!res.ok) {
+        sawError = true; // 429/403 on ANY page: result is incomplete
+        break;
+      }
 
       const data = await res.json();
       const tracks = (data.tracks?.items || []).map(mapSpotifyTrack);
@@ -127,7 +148,10 @@ export async function searchTracks(
       if (tracks.length < perPage) break;
     }
 
-    return { ok: gotOk, value: allTracks.slice(0, limit) };
+    // Cache only a complete success — a partial result truncated by a
+    // later-page 429 must NOT be frozen for the full TTL. We still return
+    // whatever pages we did get.
+    return { ok: !sawError, value: allTracks.slice(0, limit) };
   });
 }
 

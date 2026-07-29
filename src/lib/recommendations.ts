@@ -310,6 +310,13 @@ export async function generateRecommendations(
       return stripped;
     });
   }
+  // Surface a thin result (niche prompt where few artists resolved) rather
+  // than silently presenting a short list as a full curated playlist.
+  if (!result.degraded && tracks.length > 0 && tracks.length < 15) {
+    console.warn(
+      `[recommendations] ${mode} returned only ${tracks.length} tracks for a non-degraded result`
+    );
+  }
   return { ...result, tracks };
 }
 
@@ -852,10 +859,10 @@ Respond ONLY with valid JSON in this exact format, no other text:
       tierZeroTracks: exemplars,
       anchorPopularity: filters.popularity,
       tierOneCap: 6,
-      // One track per artist in the pool + a wide artist search, so the final
-      // one-per-artist cap has ~20 distinct artists to reach and never has to
-      // backfill duplicates.
-      perArtistCap: 1,
+      // Wide artist search so capOnePerArtist has ~20 distinct artists to reach.
+      // Keep up to 2 tracks per artist in the pool (default) so that a THIN
+      // neighborhood (few artists resolve) still has backfill material to pad
+      // toward 20 rather than silently returning a short list.
       artistLimit: 16,
       limit: 40,
     });
