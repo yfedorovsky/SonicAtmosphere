@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Icon } from "@/components/ui/icon";
 import { formatDuration } from "@/lib/track-parser";
 import { usePlaylistStore } from "@/stores/playlist-store";
@@ -13,7 +14,13 @@ interface TrackResultProps {
   viewMode?: "grid" | "list";
 }
 
-export function TrackResult({ track, tags, viewMode = "grid" }: TrackResultProps) {
+// Memoized: the generator page re-renders on every slider drag tick, and 20
+// image-heavy cards re-rendering per tick is what makes dragging feel laggy.
+export const TrackResult = memo(function TrackResult({
+  track,
+  tags,
+  viewMode = "grid",
+}: TrackResultProps) {
   const { addTrack, hasTrack } = usePlaylistStore();
   const { currentTrack, isPlaying, toggle } = usePlaybackStore();
   const isAdded = hasTrack(track.id);
@@ -208,4 +215,4 @@ export function TrackResult({ track, tags, viewMode = "grid" }: TrackResultProps
       </div>
     </div>
   );
-}
+});

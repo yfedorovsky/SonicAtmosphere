@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { TrackResult } from "./track-result";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
@@ -12,7 +12,9 @@ interface TrackResultsListProps {
   hasSearched?: boolean;
 }
 
-export function TrackResultsList({
+// Memoized so slider drags (which re-render the generator page per tick)
+// skip the whole results grid — its props only change on generate.
+export const TrackResultsList = memo(function TrackResultsList({
   tracks,
   isLoading = false,
   hasSearched = false,
@@ -141,4 +143,4 @@ export function TrackResultsList({
       )}
     </div>
   );
-}
+})

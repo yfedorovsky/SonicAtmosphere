@@ -42,7 +42,7 @@ export function SonicSlider({
       <div className="relative h-6 flex items-center">
         <div className="h-1.5 w-full bg-surface-container rounded-full overflow-hidden">
           <div
-            className={cn("h-full rounded-full transition-all", colorClasses[color])}
+            className={cn("h-full rounded-full transition-[width] duration-75", colorClasses[color])}
             style={{ width: `${value}%` }}
           />
         </div>
