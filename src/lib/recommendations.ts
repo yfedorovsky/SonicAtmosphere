@@ -271,14 +271,16 @@ export async function generateRecommendations(
       result = { tracks: await searchTracks(prompt, accessToken, 20), degraded: false };
   }
   // Song mode leads with the seed itself — keep it in front regardless of tempo.
+  const ranked = await annotateAndRankByTempo(
+    result.tracks,
+    tempoTarget,
+    mode === "song",
+    filters.energy
+  );
+  // Vibe mode may over-fetch for the feature re-rank; trim back after ranking.
   return {
     ...result,
-    tracks: await annotateAndRankByTempo(
-      result.tracks,
-      tempoTarget,
-      mode === "song",
-      filters.energy
-    ),
+    tracks: mode === "vibe" ? ranked.slice(0, 20) : ranked,
   };
 }
 
@@ -625,6 +627,7 @@ Name real artists whose actual music delivers this vibe. Rules:
 - Interpret sensory or scene-setting words ("coffee aroma", "rainy night") as a MOOD, never literally — do not pick novelty, background-music, or coffee-shop-compilation acts.
 - Prefer credible artists a music critic would name; never content-farm, tribute, karaoke, or "study beats" channel acts.
 - Vivid descriptors ("chaotic", "gentle", "hypnotic", "frantic") are the PRIMARY selection signal and outrank genre-canon defaults — a canonical-but-calm classic is a wrong pick when the listener asked for chaos.
+- Translate scene language into ARRANGEMENT qualities, not just tempo: layered crowds = interlocking polyrhythms and dialoguing drummers; abrupt city noise = staccato horn stabs and sharp syncopation; constant motion = urgent walking basslines and cascading comping. Choose artists and exemplar tracks famous for those textures.
 - An artist's most popular tracks are often their mellowest — when the description implies a specific energy, tempo, or intensity, the "tracks" list must name individual songs famous for exactly that quality, not the artist's biggest hits.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
@@ -635,11 +638,14 @@ Respond ONLY with valid JSON in this exact format, no other text:
     // Claude's exemplar songs lead the playlist — they carry the within-catalog
     // mood (energy/tempo/intensity) that artist-level search can't express.
     const exemplars = await resolveExemplarTracks(accessToken, neighborhood.tracks ?? []);
+    // With an active tempo/energy intent, over-fetch so the feature-based
+    // re-rank selects from a wider pool instead of reordering a popularity cut.
+    const intentActive = tempoTarget !== null || Math.abs(filters.energy - 50) > 10;
     const tracks = await resolveAndRank(accessToken, neighborhood, {
       tierZeroTracks: exemplars,
       anchorPopularity: filters.popularity,
       tierOneCap: 6,
-      limit: 20,
+      limit: intentActive ? 32 : 20,
     });
     if (tracks.length > 0) return { tracks, degraded: false };
   }

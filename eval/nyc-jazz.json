@@ -1,0 +1,28 @@
+{
+  "name": "nyc-hard-bop",
+  "description": "Golden dataset for the 'chaotic NYC hard bop' vibe prompt — 20 user-curated reference tracks (2026-07-29). Overlap is a floor, not a ceiling: off-list picks with the right texture (e.g. Un Poco Loco, Boogie Stop Shuffle) are wins, not misses.",
+  "prompt": "classic hard bop / cool bop jazz that describes chaotic NYC rhythm",
+  "filters": { "energy": 75 },
+  "golden": [
+    { "artist": "Lee Morgan", "title": "The Sidewinder" },
+    { "artist": "Art Blakey", "title": "Moanin'" },
+    { "artist": "Art Blakey", "title": "Blues March" },
+    { "artist": "Horace Silver", "title": "Blowin' the Blues Away" },
+    { "artist": "Hank Mobley", "title": "Remember" },
+    { "artist": "Clifford Brown", "title": "Sandu" },
+    { "artist": "Clifford Brown", "title": "Joy Spring" },
+    { "artist": "Jackie McLean", "title": "Das' Dat" },
+    { "artist": "Johnny Griffin", "title": "Mind Games" },
+    { "artist": "Thelonious Monk", "title": "Well, You Needn't" },
+    { "artist": "Charles Mingus", "title": "Nostalgia in Times Square" },
+    { "artist": "Miles Davis", "title": "So What" },
+    { "artist": "Oliver Nelson", "title": "Stolen Moments" },
+    { "artist": "Sonny Rollins", "title": "St. Thomas" },
+    { "artist": "Wayne Shorter", "title": "Speak No Evil" },
+    { "artist": "Freddie Hubbard", "title": "Birdlike" },
+    { "artist": "Kenny Burrell", "title": "Chitlins con Carne" },
+    { "artist": "Art Blakey", "title": "A Night in Tunisia" },
+    { "artist": "Lou Donaldson", "title": "Blues Walk" },
+    { "artist": "Dexter Gordon", "title": "Our Love Is Here to Stay" }
+  ]
+}
