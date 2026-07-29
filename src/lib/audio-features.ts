@@ -10,10 +10,47 @@ const REQUEST_TIMEOUT_MS = 5_000;
 
 const globalForFeatures = globalThis as unknown as {
   __saAudioFeatures?: Map<string, AudioFeatures | null>;
+  __saDeezerBpm?: Map<string, number | null>;
 };
 
 function cache(): Map<string, AudioFeatures | null> {
   return (globalForFeatures.__saAudioFeatures ??= new Map());
+}
+
+function deezerCache(): Map<string, number | null> {
+  return (globalForFeatures.__saDeezerBpm ??= new Map());
+}
+
+// Beat detectors mis-read swing and mellow material by octave or 1.5x (a ~89
+// BPM Charlie Parker ballad came back as 132.6 on one release and ~89 on two
+// others of the SAME recording). Deezer exposes its own perceptual BPM keyed
+// by ISRC — when the two providers disagree beyond tolerance, Deezer wins.
+async function fetchDeezerBpm(isrc: string): Promise<number | null> {
+  const cached = deezerCache().get(isrc);
+  if (cached !== undefined) return cached;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://api.deezer.com/2.0/track/isrc:${isrc}`, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) return null; // transient — leave uncached for retry
+    const data = await res.json();
+    const bpm = typeof data?.bpm === "number" && data.bpm >= 40 && data.bpm <= 250 ? data.bpm : null;
+    deezerCache().set(isrc, bpm);
+    return bpm;
+  } catch {
+    return null; // network/timeout — leave uncached
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function reconcileTempo(reccoTempo: number, deezerBpm: number | null): number {
+  if (deezerBpm === null) return reccoTempo;
+  const tolerance = Math.max(8, deezerBpm * 0.08);
+  return Math.abs(reccoTempo - deezerBpm) > tolerance ? deezerBpm : reccoTempo;
 }
 
 // ReccoBeats items use their own UUID as `id`; the Spotify id lives in `href`.
@@ -54,7 +91,7 @@ async function fetchBatch(ids: string[]): Promise<void> {
     if (!res.ok) return;
     const data = await res.json();
     const items: unknown[] = Array.isArray(data?.content) ? data.content : [];
-    const returned = new Set<string>();
+    const parsed: { features: AudioFeatures; isrc: string | null }[] = [];
     for (const item of items) {
       if (!item || typeof item !== "object") continue;
       const raw = item as Record<string, unknown>;
@@ -62,9 +99,22 @@ async function fetchBatch(ids: string[]): Promise<void> {
       if (!spotifyId) continue;
       const features = toAudioFeatures(spotifyId, raw);
       if (features) {
-        cache().set(spotifyId, features);
-        returned.add(spotifyId);
+        parsed.push({ features, isrc: typeof raw.isrc === "string" ? raw.isrc : null });
       }
+    }
+
+    // Tempo cross-check (deduped by ISRC — re-releases share a recording).
+    const uniqueIsrcs = [...new Set(parsed.map((p) => p.isrc).filter((i): i is string => !!i))];
+    const bpmEntries = await Promise.all(
+      uniqueIsrcs.map(async (isrc) => [isrc, await fetchDeezerBpm(isrc)] as const)
+    );
+    const bpmByIsrc = new Map(bpmEntries);
+
+    const returned = new Set<string>();
+    for (const { features, isrc } of parsed) {
+      const deezerBpm = isrc ? bpmByIsrc.get(isrc) ?? null : null;
+      cache().set(features.id, { ...features, tempo: reconcileTempo(features.tempo, deezerBpm) });
+      returned.add(features.id);
     }
     // A successful response that omits a requested id is a confirmed miss —
     // cache it so we never re-ask. Failed requests cache nothing.

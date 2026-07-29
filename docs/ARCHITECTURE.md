@@ -99,7 +99,7 @@ Probed 2026-07 with this app's credentials:
 | `GET /artists/{id}/top-tracks` | ❌ 403 |
 | Artist `genres` field | ❌ always absent |
 
-Consequences: all similarity features route through search + Claude, and audio features come from outside Spotify entirely — `src/lib/audio-features.ts` fetches them from the free ReccoBeats API keyed by Spotify track id (in-process cache, batched, fail-soft), serving `/api/spotify/audio-features` (IP rate-limited, no Spotify auth), tempo annotation in the generation pipeline, and the client vibe-drift hook unchanged. If the app passes Spotify's extended-quota review the native endpoints may light up again — the code already prefers them when they respond.
+Consequences: all similarity features route through search + Claude, and audio features come from outside Spotify entirely — `src/lib/audio-features.ts` fetches them from the free ReccoBeats API keyed by Spotify track id (in-process cache, batched, fail-soft), serving `/api/spotify/audio-features` (IP rate-limited, no Spotify auth), tempo annotation in the generation pipeline, and the client vibe-drift hook unchanged. Tempo is cross-checked against Deezer's per-recording BPM (joined on the ISRC ReccoBeats returns, deduped so re-releases cost one lookup): beat detectors mis-read swing/mellow material by octave or 1.5× — one release of an ~89 BPM Charlie Parker ballad came back as 132.6 — so when the providers disagree beyond ~8%, Deezer's perceptual value wins. If the app passes Spotify's extended-quota review the native endpoints may light up again — the code already prefers them when they respond.
 
 ## Security notes
 
