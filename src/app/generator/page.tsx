@@ -32,6 +32,8 @@ function GeneratorContent() {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [filters, setFilters] = useState<FilterValues>(DEFAULT_FILTERS);
   const [results, setResults] = useState<SpotifyTrack[]>([]);
+  // Server flag: results came from a plain-search fallback, not the AI engine.
+  const [degraded, setDegraded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -91,11 +93,14 @@ function GeneratorContent() {
       if (res.ok) {
         const data = await res.json();
         setResults(data.tracks || []);
+        setDegraded(Boolean(data.degraded));
       } else {
         setResults([]);
+        setDegraded(false);
       }
     } catch {
       setResults([]);
+      setDegraded(false);
     } finally {
       setIsLoading(false);
     }
@@ -223,6 +228,15 @@ function GeneratorContent() {
         </div>
 
         <div className="flex-1 min-w-0">
+          {degraded && !isLoading && (
+            <div className="mb-4 flex items-center gap-3 bg-tertiary-container/20 border border-tertiary/30 rounded-2xl px-5 py-3 animate-fade-in">
+              <Icon name="warning" size="sm" className="text-tertiary shrink-0" />
+              <p className="text-sm text-on-surface-variant">
+                AI engine unavailable — showing basic search results. Try again in a
+                minute for curated recommendations.
+              </p>
+            </div>
+          )}
           {filtersDirty && (
             <div className="mb-4 flex items-center justify-between gap-4 bg-surface-container/60 border border-primary/20 rounded-2xl px-5 py-3 animate-fade-in">
               <p className="text-sm text-on-surface-variant">

@@ -73,17 +73,28 @@ export async function GET(request: NextRequest) {
   }
 
   const source = accessToken ? "user-token" : "client-credentials";
-  const tracks = await generateRecommendations(token, query, type as GeneratorMode, filters);
+  const { tracks, degraded } = await generateRecommendations(
+    token,
+    query,
+    type as GeneratorMode,
+    filters
+  );
 
   // If recommendations returned empty, fall back to keyword search
   if (tracks.length === 0) {
     const searchResults = await keywordVibeSearch(token, query, moods, limit);
     logGenerationRun({ ...runContext, source: `${source}-fallback`, resultCount: searchResults.length });
-    return NextResponse.json({ tracks: searchResults });
+    return NextResponse.json({ tracks: searchResults, degraded: true });
   }
 
-  logGenerationRun({ ...runContext, source, resultCount: tracks.length });
-  return NextResponse.json({ tracks });
+  // The degraded flag tells the client these tracks came from a plain-search
+  // fallback (e.g. the LLM was unavailable), not the grounded engine.
+  logGenerationRun({
+    ...runContext,
+    source: degraded ? `${source}-fallback` : source,
+    resultCount: tracks.length,
+  });
+  return NextResponse.json({ tracks, degraded });
 }
 
 // A failed log line must never fail the search; after() defers the write to
