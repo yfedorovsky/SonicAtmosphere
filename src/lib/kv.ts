@@ -85,3 +85,23 @@ export async function kvSet<T>(key: string, value: T, ttlSeconds: number): Promi
     /* fail soft — a failed cache write just means a future re-fetch */
   }
 }
+
+/**
+ * Atomically increment a counter and return its new value, or null on
+ * no-KV / any error (callers treat null as "counter unavailable"). The TTL is
+ * set only on the first increment (`n === 1`): the caller keys these by date,
+ * so a single expiry per day is enough and it spares a round trip on the hot
+ * path. INCR is atomic across serverless instances — the reason a shared KV
+ * counter, not an in-process one, is the source of truth for a global cap.
+ */
+export async function kvIncr(key: string, ttlSeconds: number): Promise<number | null> {
+  const redis = client();
+  if (!redis) return null;
+  try {
+    const n = await redis.incr(key);
+    if (n === 1) await redis.expire(key, ttlSeconds);
+    return typeof n === "number" ? n : null;
+  } catch {
+    return null; // KV outage must never block a Spotify call
+  }
+}

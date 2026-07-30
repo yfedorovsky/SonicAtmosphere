@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import type { SpotifyTrack } from "@/types";
 import { kvGet, kvSet } from "@/lib/kv";
+import { noteSpotifyCall, secondsUntilUtcReset } from "@/lib/budget";
 
 const SPOTIFY_API = "https://api.spotify.com/v1";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -46,6 +47,26 @@ async function spotifyFetch(
   accessToken: string,
   options?: RequestInit
 ): Promise<Response> {
+  // Global daily budget: count this call and, if the self-imposed cap is spent,
+  // synthesize a 429 instead of hitting Spotify. Every caller already treats a
+  // non-ok response as a rate-limit and degrades to plain-search fallback, so
+  // no caller needs to change — this just slides the app to degraded mode for
+  // the rest of the UTC day rather than tripping Spotify's ~12h hard lockout.
+  // Fail-soft: without a KV counter the cap doesn't apply (see lib/budget).
+  const budget = await noteSpotifyCall();
+  if (!budget.allowed) {
+    return new Response(
+      JSON.stringify({ error: { status: 429, message: "daily call budget reached" } }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(secondsUntilUtcReset()),
+        },
+      }
+    );
+  }
+
   const res = await fetch(`${SPOTIFY_API}${path}`, {
     ...options,
     headers: {
