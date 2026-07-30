@@ -1,4 +1,4 @@
-import { kvIncr } from "@/lib/kv";
+import { kvGet, kvIncr } from "@/lib/kv";
 
 // Self-imposed daily ceiling on Spotify API calls, enforced globally through a
 // KV counter keyed by UTC date.
@@ -69,6 +69,24 @@ export async function noteSpotifyCall(): Promise<BudgetState> {
     );
   }
   return { count, budget, allowed };
+}
+
+/**
+ * Whether today's remaining budget can cover a WHOLE generation (~`reserve`
+ * Spotify calls). Checked once at the start of a generation so we fail the
+ * whole thing cleanly up front rather than starting it and dying mid-flight —
+ * a half-resolved neighborhood marked non-degraded is worse than a clean
+ * degrade. Read-only (no increment). Returns true when the counter is
+ * unavailable (no KV → no cap), matching noteSpotifyCall's fail-soft. Not a
+ * true reservation: concurrent generations can both pass, but that leaves at
+ * most a small overshoot, not a partial playlist.
+ */
+export async function budgetAllowsGeneration(reserve: number): Promise<boolean> {
+  const raw = await kvGet<number>(todayKey());
+  if (raw === null) return true; // no shared counter → no cap
+  const count = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(count)) return true;
+  return count + reserve <= dailyBudget();
 }
 
 /** Seconds until the UTC counter rolls over — a truthful Retry-After. */

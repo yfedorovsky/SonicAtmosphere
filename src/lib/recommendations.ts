@@ -13,6 +13,12 @@ import type { SpotifyTrack, GeneratorMode, FilterValues } from "@/types";
 import type { AudioFeatures } from "./spotify";
 import { fetchAudioFeatures, resolveTempo } from "@/lib/audio-features";
 import { getArtistTags, tagsHitVeto } from "@/lib/lastfm";
+import { budgetAllowsGeneration } from "@/lib/budget";
+
+// A generation fans out to ~25–40 Spotify search calls. Check the daily budget
+// can cover a whole one BEFORE starting so we fail cleanly up front instead of
+// dying mid-flight with a half-resolved neighborhood (see lib/budget).
+const CALLS_PER_GENERATION = 40;
 
 // Map vibe keywords to Spotify genre seeds
 const VIBE_TO_GENRES: Record<string, string[]> = {
@@ -258,6 +264,14 @@ export async function generateRecommendations(
   // weakest) must pass false to keep fit-ranked order.
   options: { sequence?: boolean } = {}
 ): Promise<RecommendationResult> {
+  // Generation-aware budget gate: if today's Spotify budget can't cover a whole
+  // generation, fail cleanly NOW rather than starting one that dies mid-flight
+  // and returns a half-resolved neighborhood marked non-degraded.
+  if (!(await budgetAllowsGeneration(CALLS_PER_GENERATION))) {
+    console.warn("[recommendations] daily Spotify budget exhausted — skipping generation (degraded)");
+    return { tracks: [], degraded: true };
+  }
+
   // Only free-text modes can express a workout/tempo intent. Song and artist
   // prompts are titles/names — "Born to Run" is not a running request.
   const tempoTarget =
@@ -439,6 +453,7 @@ async function annotateAndRank(
       resolveTempo(features.get(t.id)?.tempo ?? null, t.isrc, {
         title: t.name,
         artist: t.artists[0]?.name ?? "",
+        durationSec: t.duration_ms ? t.duration_ms / 1000 : null,
       })
     )
   );
@@ -727,6 +742,30 @@ interface Neighborhood {
 
 // One JSON round trip to Claude. Opus-tier knowledge matters: obscure artists
 // misidentified by a smaller model produce a completely wrong playlist.
+// Forced structured output. The model MUST return the neighborhood as this
+// tool's input, so it cannot emit prose, code fences, unescaped quotes, or a
+// "looks-like-JSON-but-isn't" string — the entire malformed-JSON failure class
+// is gone. opus-5 reasons heavily before answering, so a truncated response is
+// now a detectable stop_reason="max_tokens" (incomplete tool input) we retry,
+// not a silent partial parse. Universal schema across modes: song/artist/genre
+// prompts simply leave tracks/avoid_tags empty.
+const NEIGHBORHOOD_TOOL: Anthropic.Tool = {
+  name: "emit_neighborhood",
+  description:
+    "Return the musical neighborhood for the request as structured lists. Emit your answer ONLY through this tool.",
+  input_schema: {
+    type: "object",
+    properties: {
+      artists: { type: "array", items: { type: "string" }, description: "Real artists spanning the neighborhood." },
+      genres: { type: "array", items: { type: "string" }, description: "Short genre terms as used on Spotify." },
+      keywords: { type: "array", items: { type: "string" }, description: "Optional short track-search phrases." },
+      tracks: { type: "array", items: { type: "string" }, description: "Optional exemplar songs, each 'Title | Artist'." },
+      avoid_tags: { type: "array", items: { type: "string" }, description: "Optional contrast-class tags a fitting track must NOT carry." },
+    },
+    required: ["artists", "genres"],
+  },
+};
+
 async function askNeighborhood(content: string): Promise<Neighborhood | null> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn("[recommendations] ANTHROPIC_API_KEY not set — LLM neighborhood unavailable");
@@ -734,46 +773,47 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
   }
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const strings = (v: unknown, max: number) =>
-    Array.isArray(v)
-      ? v.filter((x): x is string => typeof x === "string").slice(0, max)
-      : [];
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, max) : [];
 
-  // Up to two attempts. opus-5 spends most of its output budget on internal
-  // reasoning (~1.4–2k tokens observed for this task) BEFORE emitting the JSON,
-  // so a tight max_tokens intermittently left no room for the JSON — it came
-  // back empty or truncated ("Unterminated string"), the parse threw, and the
-  // whole generation fell back to degraded keyword search. Give the JSON ample
-  // headroom AND retry once, since the failure is stochastic per run.
+  // Ample headroom for reasoning + the tool call; retry once since a truncation
+  // is stochastic per run and a second attempt almost always finishes.
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const response = await anthropic.messages.create({
         model: "claude-opus-5",
-        max_tokens: 4096, // reasoning + the JSON both fit; 2000 did not
+        max_tokens: 6000,
+        tools: [NEIGHBORHOOD_TOOL],
+        tool_choice: { type: "tool", name: "emit_neighborhood" },
         messages: [{ role: "user", content }],
       });
       if (response.stop_reason === "refusal") {
         console.error("[recommendations] neighborhood request refused by model");
         return null; // a refusal won't change on retry
       }
-      const textBlock = response.content.find((c) => c.type === "text");
-      const text = textBlock && textBlock.type === "text" ? textBlock.text.trim() : "";
-      // Salvage the outermost {...} so stray prose or code fences can't break
-      // the parse. Empty text (reasoning ate the whole budget) falls through
-      // to a retry rather than failing outright.
-      const start = text.indexOf("{");
-      const end = text.lastIndexOf("}");
-      if (start !== -1 && end > start) {
-        const parsed = JSON.parse(text.slice(start, end + 1));
+      if (response.stop_reason === "max_tokens") {
+        console.warn(`[recommendations] neighborhood tool call truncated (attempt ${attempt}) — retrying`);
+        continue; // incomplete tool input — never trust a truncated neighborhood
+      }
+      const toolUse = response.content.find((c) => c.type === "tool_use");
+      const input =
+        toolUse && toolUse.type === "tool_use" ? (toolUse.input as Record<string, unknown>) : null;
+      if (input) {
+        const artists = strings(input.artists, 16);
+        const genres = strings(input.genres, 3);
+        if (artists.length === 0 && genres.length === 0) {
+          console.warn(`[recommendations] neighborhood tool returned empty (attempt ${attempt}) — retrying`);
+          continue;
+        }
         return {
-          artists: strings(parsed.artists, 16),
-          genres: strings(parsed.genres, 3),
-          keywords: strings(parsed.keywords, 2),
-          tracks: strings(parsed.tracks, 6),
-          avoidTags: strings(parsed.avoid_tags ?? parsed.avoidTags, 6),
+          artists,
+          genres,
+          keywords: strings(input.keywords, 2),
+          tracks: strings(input.tracks, 6),
+          avoidTags: strings(input.avoid_tags ?? input.avoidTags, 6),
         };
       }
       console.warn(
-        `[recommendations] neighborhood produced no parseable JSON (attempt ${attempt}, stop_reason=${response.stop_reason}, len=${text.length})`
+        `[recommendations] neighborhood: no tool_use block (attempt ${attempt}, stop_reason=${response.stop_reason})`
       );
     } catch (err) {
       console.warn(

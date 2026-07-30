@@ -42,7 +42,8 @@ interface DeezerRecord {
   bpm: number | null;
   title: string;
   titleShort: string;
-  artists: string[]; // primary + contributors, for a lenient identity match
+  artists: string[]; // primary + contributors, for the identity match
+  durationSec: number | null; // for the duration cross-check
 }
 
 const globalForFeatures = globalThis as unknown as {
@@ -185,6 +186,7 @@ async function fetchDeezerRecord(isrc: string): Promise<DeezerRecord | null> {
       title: data.title,
       titleShort: typeof data.title_short === "string" ? data.title_short : data.title,
       artists: [...new Set([primary, ...contributors].filter((n): n is string => !!n))],
+      durationSec: typeof data.duration === "number" ? data.duration : null,
     };
     deezerCache().set(isrc, rec);
     await kvSet(kvKey, rec, BPM_KV_TTL_S);
@@ -204,27 +206,53 @@ const normTitle = (s: string) =>
   normArtist(s.replace(/\s*[([].*?[)\]]\s*/g, " ").split(" - ")[0]);
 
 /**
- * Lenient recording-identity match: BOTH a title and an artist must line up
- * (equality, or containment when the shorter side is >= 4 chars so short
- * substrings can't coincidentally match). A genuine ISRC collision differs on
- * both title and artist, so it fails; a legit re-release or remaster of the
- * same recording still passes. Unverifiable expectations (empty title/artist)
- * accept, so the guard only ever removes KNOWN-bad joins.
+ * Recording-identity match, tightened per adversarial review. A binary
+ * accept/reject over crowd data is inherently fuzzy, so we (a) demand a
+ * duration cross-check when both sides expose it (a strong, cheap
+ * discriminator), and (b) require STRONG title+artist evidence — the loose
+ * both-sides-contains rule false-accepted collisions on short shared tokens
+ * ("love", "run") and the ambiguous middle. Now: exact/near-exact (prefix)
+ * beats loose containment; loose containment needs a real length floor; and
+ * loose-title + loose-artist together (the ambiguous middle) is rejected.
+ * A genuine ISRC collision differs on duration and/or both fields, so it fails;
+ * a legit remaster/re-release of the same recording still passes. Unverifiable
+ * expectations (empty title/artist) accept — the guard only removes KNOWN-bad
+ * joins, never injects signal on non-tempo prompts.
  */
 export function deezerIdentityMatches(
-  rec: { title: string; titleShort: string; artists: string[] },
-  expected: { title: string; artist: string }
+  rec: { title: string; titleShort: string; artists: string[]; durationSec?: number | null },
+  expected: { title: string; artist: string; durationSec?: number | null }
 ): boolean {
   const eT = normTitle(expected.title);
   const eA = normArtist(expected.artist);
   if (!eT || !eA) return true; // can't verify → don't discard (conservative)
-  const contains = (a: string, b: string) =>
-    a === b || (b.length >= 4 && a.includes(b)) || (a.length >= 4 && b.includes(a));
-  const titleOk = [normTitle(rec.title), normTitle(rec.titleShort)]
-    .filter(Boolean)
-    .some((d) => contains(d, eT));
-  const artistOk = rec.artists.map(normArtist).filter(Boolean).some((d) => contains(d, eA));
-  return titleOk && artistOk;
+
+  // Duration cross-check first: a >8s gap is almost never the same recording.
+  if (
+    expected.durationSec != null &&
+    rec.durationSec != null &&
+    Math.abs(expected.durationSec - rec.durationSec) > 8
+  ) {
+    return false;
+  }
+
+  const dTitles = [normTitle(rec.title), normTitle(rec.titleShort)].filter(Boolean);
+  const dArtists = rec.artists.map(normArtist).filter(Boolean);
+
+  const titleExact = dTitles.some((d) => d === eT || d.startsWith(eT) || eT.startsWith(d));
+  const titleLoose = dTitles.some(
+    (d) => d.length >= 6 && eT.length >= 6 && (d.includes(eT) || eT.includes(d))
+  );
+  const artistExact = dArtists.some((d) => d === eA);
+  const artistLoose = dArtists.some(
+    (d) => d.length >= 5 && eA.length >= 5 && (d.includes(eA) || eA.includes(d))
+  );
+
+  // Require strong evidence on at least one axis; reject the loose+loose middle.
+  if (titleExact && artistExact) return true;
+  if (titleExact && artistLoose) return true;
+  if (titleLoose && artistExact) return true;
+  return false;
 }
 
 function reconcileTempo(reccoTempo: number, deezerBpm: number | null): number {
@@ -245,13 +273,26 @@ function reconcileTempo(reccoTempo: number, deezerBpm: number | null): number {
 export async function resolveTempo(
   featureTempo: number | null,
   isrc: string | undefined,
-  expected: { title: string; artist: string }
+  expected: { title: string; artist: string; durationSec?: number | null }
 ): Promise<number | null> {
   let deezerBpm: number | null = null;
   if (isrc) {
     const rec = await fetchDeezerRecord(isrc);
-    if (rec && rec.bpm !== null && deezerIdentityMatches(rec, expected)) {
-      deezerBpm = rec.bpm;
+    if (rec && rec.bpm !== null) {
+      if (deezerIdentityMatches(rec, expected)) {
+        deezerBpm = rec.bpm;
+      } else {
+        // Auditable: a discarded BPM means either a rejected collision (good) or
+        // a false-reject of a legit variant (bad). Log so both are reviewable.
+        console.log(
+          `[deezer] reject bpm=${rec.bpm} isrc=${isrc} want "${expected.title}"/"${expected.artist}"` +
+            ` got "${rec.titleShort}"/"${rec.artists[0] ?? "?"}" durΔ=${
+              expected.durationSec != null && rec.durationSec != null
+                ? Math.abs(expected.durationSec - rec.durationSec)
+                : "?"
+            }`
+        );
+      }
     }
   }
   if (featureTempo !== null) return reconcileTempo(featureTempo, deezerBpm);

@@ -1,6 +1,7 @@
 ﻿import { after, NextRequest, NextResponse } from "next/server";
 import { getClientCredentialsToken, searchTracks } from "@/lib/spotify";
 import { generateRecommendations, keywordVibeSearch } from "@/lib/recommendations";
+import { budgetAllowsGeneration } from "@/lib/budget";
 import { type FilterValues, type GeneratorMode } from "@/types";
 
 import { getDb } from "@/db";
@@ -83,8 +84,14 @@ export async function GET(request: NextRequest) {
     { sequence: request.nextUrl.searchParams.get("sequence") !== "0" }
   );
 
-  // If recommendations returned empty, fall back to keyword search
+  // If recommendations returned empty, fall back to keyword search — UNLESS the
+  // daily budget gate is what emptied it, in which case spraying more fallback
+  // searches just burns quota on synthetic 429s. Keep the degraded path clean.
   if (tracks.length === 0) {
+    if (!(await budgetAllowsGeneration(8))) {
+      logGenerationRun({ ...runContext, source: `${source}-budget-exhausted`, resultCount: 0 });
+      return NextResponse.json({ tracks: [], degraded: true });
+    }
     const searchResults = await keywordVibeSearch(token, query, moods, limit);
     logGenerationRun({ ...runContext, source: `${source}-fallback`, resultCount: searchResults.length });
     return NextResponse.json({ tracks: searchResults, degraded: true });
