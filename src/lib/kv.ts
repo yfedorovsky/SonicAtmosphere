@@ -15,12 +15,32 @@ import { Redis } from "@upstash/redis";
 
 const globalForKv = globalThis as unknown as { __saKvClient?: Redis | null };
 
+// The Vercel Upstash integration lets you choose a custom env-var PREFIX when
+// connecting (e.g. "STORAGE" → STORAGE_REST_API_URL). Resolve credentials
+// prefix-agnostically: try the standard names, then any *REST_API_URL var with
+// a matching *REST_API_TOKEN. A redis:// connection string (…_REDIS_URL) is not
+// the REST endpoint and is intentionally ignored.
+function resolveCreds(): { url: string; token: string } | null {
+  const known: [string | undefined, string | undefined][] = [
+    [process.env.KV_REST_API_URL, process.env.KV_REST_API_TOKEN],
+    [process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN],
+  ];
+  for (const [url, token] of known) if (url && token) return { url, token };
+
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value && /REST_API_URL$/.test(name)) {
+      const token = process.env[name.replace(/URL$/, "TOKEN")];
+      if (token) return { url: value, token };
+    }
+  }
+  return null;
+}
+
 function client(): Redis | null {
   if (globalForKv.__saKvClient !== undefined) return globalForKv.__saKvClient;
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  const creds = resolveCreds();
   try {
-    globalForKv.__saKvClient = url && token ? new Redis({ url, token }) : null;
+    globalForKv.__saKvClient = creds ? new Redis(creds) : null;
   } catch {
     globalForKv.__saKvClient = null;
   }
