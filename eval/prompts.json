@@ -1,0 +1,36 @@
+{
+  "note": "Frozen evaluation prompt set for the recommendation pipeline. Spans all four modes and three difficulty tiers. Keep this STABLE — changing prompts invalidates comparisons against prior judgments. Add new prompts with new ids; never edit or delete existing ones.",
+  "prompts": [
+    { "id": "vibe-roadtrip", "mode": "vibe", "difficulty": "easy", "filters": { "energy": 55 }, "text": "road trip music, a mix of chill and upbeat, not too many lulls; throwbacks and new music alike, nothing without lyrics; similar to Orbiter by Noah Kahan, Music Is Better by Rufus Du Sol, and Sun Came Up by Sofi Tukker & John Summit" },
+    { "id": "vibe-hardbop-nyc", "mode": "vibe", "difficulty": "hard", "filters": { "energy": 75 }, "text": "classic hard bop / cool bop jazz that describes chaotic NYC rhythm" },
+    { "id": "vibe-balthvs-coffee", "mode": "vibe", "difficulty": "medium", "filters": {}, "text": "similar vibes to Turkish Coffee by BALTHVS — you feel the aroma of coffee but also beautiful guitar and mellow Colombian funky beats" },
+    { "id": "vibe-melodic-run", "mode": "vibe", "difficulty": "medium", "filters": { "energy": 70 }, "text": "melodic house made for running, euphoric and driving, not too many lulls" },
+    { "id": "vibe-rainy-lofi", "mode": "vibe", "difficulty": "easy", "filters": { "energy": 30 }, "text": "late night neon rainy city streets with lo-fi jazz beats, mellow and instrumental" },
+    { "id": "vibe-summer-party", "mode": "vibe", "difficulty": "easy", "filters": { "energy": 70 }, "text": "warm sophisticated summer backyard party, conversation-friendly, lightly funky and jazzy, cross-generational" },
+    { "id": "vibe-shoegaze-drive", "mode": "vibe", "difficulty": "medium", "filters": {}, "text": "hazy dreampop and shoegaze for a night drive, wall-of-sound guitars, wistful but not sad" },
+    { "id": "vibe-afrobeats-cookout", "mode": "vibe", "difficulty": "medium", "filters": { "energy": 65 }, "text": "afrobeats and amapiano for a cookout, sunny and danceable, mix of hits and deeper cuts" },
+    { "id": "vibe-focus-classical", "mode": "vibe", "difficulty": "hard", "filters": { "energy": 25 }, "text": "somber solo piano and minimalist classical for deep focus, no vocals, nothing dramatic" },
+    { "id": "vibe-90s-hiphop-workout", "mode": "vibe", "difficulty": "medium", "filters": { "energy": 85 }, "text": "boom bap 90s east coast hip hop for a hard workout, aggressive and heavy, no radio pop" },
+    { "id": "vibe-ethio-jazz", "mode": "vibe", "difficulty": "hard", "filters": {}, "text": "hypnotic Ethiopian jazz and psychedelic Anatolian funk, vintage organ and modal grooves" },
+    { "id": "vibe-hiit-otf", "mode": "vibe", "difficulty": "medium", "filters": { "energy": 80 }, "text": "house bangers for an Orange Theory / Barry's Bootcamp HIIT class, relentless energy" },
+
+    { "id": "song-heat-waves", "mode": "song", "difficulty": "easy", "filters": {}, "text": "Heat Waves by Glass Animals" },
+    { "id": "song-teardrop", "mode": "song", "difficulty": "medium", "filters": {}, "text": "Teardrop by Massive Attack" },
+    { "id": "song-so-what", "mode": "song", "difficulty": "hard", "filters": {}, "text": "So What by Miles Davis" },
+    { "id": "song-mr-brightside", "mode": "song", "difficulty": "easy", "filters": {}, "text": "Mr. Brightside by The Killers" },
+    { "id": "song-midnight-city", "mode": "song", "difficulty": "medium", "filters": {}, "text": "Midnight City by M83" },
+    { "id": "song-palm-of-my-hands", "mode": "song", "difficulty": "medium", "filters": {}, "text": "Palm of My Hands by John Summit (Odd Mob Remix)" },
+
+    { "id": "artist-khruangbin", "mode": "artist", "difficulty": "medium", "filters": {}, "text": "Khruangbin" },
+    { "id": "artist-radiohead", "mode": "artist", "difficulty": "easy", "filters": {}, "text": "Radiohead" },
+    { "id": "artist-fela-kuti", "mode": "artist", "difficulty": "hard", "filters": {}, "text": "Fela Kuti" },
+    { "id": "artist-taylor-swift", "mode": "artist", "difficulty": "easy", "filters": {}, "text": "Taylor Swift" },
+    { "id": "artist-aphex-twin", "mode": "artist", "difficulty": "hard", "filters": {}, "text": "Aphex Twin" },
+
+    { "id": "genre-neo-soul", "mode": "genre", "difficulty": "medium", "filters": {}, "text": "neo soul" },
+    { "id": "genre-dnb", "mode": "genre", "difficulty": "medium", "filters": {}, "text": "drum and bass" },
+    { "id": "genre-bossa-nova", "mode": "genre", "difficulty": "medium", "filters": {}, "text": "bossa nova" },
+    { "id": "genre-post-punk", "mode": "genre", "difficulty": "medium", "filters": {}, "text": "post-punk" },
+    { "id": "genre-outlaw-country", "mode": "genre", "difficulty": "hard", "filters": {}, "text": "outlaw country" }
+  ]
+}
