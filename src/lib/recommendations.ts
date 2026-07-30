@@ -444,62 +444,99 @@ async function annotateAndRank(
     return tempo != null ? { ...t, tempo: Math.round(tempo) } : t;
   });
 
-  // Exemplar centroid over texture dimensions, when exemplars resolved.
+  // --- Texture ranking: z-scored exemplar k-NN ---
+  // Per-dimension standardization against the candidate pool (poor-man's
+  // Mahalanobis): distances become comparable across dims and, crucially,
+  // transferable across prompts instead of tuned to raw 0-1 magnitudes.
+  const energyIdx = TEXTURE_DIMS.indexOf("energy");
+  const poolFeatures = tracks
+    .map((t) => features.get(t.id))
+    .filter((f): f is AudioFeatures => !!f);
+  const stats = TEXTURE_DIMS.map((dim) => {
+    const vals = poolFeatures.map((f) => f[dim]);
+    const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    const variance = vals.length
+      ? vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length
+      : 0;
+    return { mean, sd: Math.sqrt(variance) || 1 };
+  });
+  // Valence is the least reliable Spotify-derived feature (opaque composite) —
+  // down-weight it so it doesn't dominate texture distance.
+  const DIM_WEIGHTS: Record<(typeof TEXTURE_DIMS)[number], number> = {
+    energy: 1,
+    danceability: 1,
+    valence: 0.3,
+    acousticness: 1,
+    instrumentalness: 1,
+  };
+  const zvec = (f: AudioFeatures) =>
+    TEXTURE_DIMS.map((dim, i) => (f[dim] - stats[i].mean) / stats[i].sd);
+  const weightedDist = (za: number[], zb: number[]) =>
+    Math.sqrt(
+      TEXTURE_DIMS.reduce((s, dim, i) => s + DIM_WEIGHTS[dim] * (za[i] - zb[i]) ** 2, 0)
+    );
+
+  // Reference set for texture k-NN: the resolved exemplars. If vibe intended
+  // exemplars but <2 resolved, fall back to the top-ranked tier-0 candidates
+  // (pseudo-exemplars) so texture ranking is never SILENTLY disabled.
   const exemplarFeatures = ctx.exemplarIds
     .map((id) => features.get(id))
     .filter((f): f is AudioFeatures => !!f);
-  const centroid =
-    exemplarFeatures.length >= 2
-      ? TEXTURE_DIMS.map(
-          (dim) =>
-            exemplarFeatures.reduce((sum, f) => sum + f[dim], 0) / exemplarFeatures.length
-        )
-      : null;
-
-  const centroidDist = (t: SpotifyTrack): number => {
-    const f = features.get(t.id);
-    if (!f || !centroid) return 0.25; // neutral for unknowns / no centroid
-    return (
-      TEXTURE_DIMS.reduce((sum, dim, i) => sum + Math.abs(f[dim] - centroid[i]), 0) /
-      TEXTURE_DIMS.length
+  let refZ: number[][] = [];
+  let textureSource = "none";
+  if (exemplarFeatures.length >= 2) {
+    refZ = exemplarFeatures.map(zvec);
+    textureSource = "exemplars";
+  } else if (ctx.exemplarIds.length > 0) {
+    const pseudo = poolFeatures.slice(0, 5);
+    if (pseudo.length >= 2) {
+      refZ = pseudo.map(zvec);
+      textureSource = "pseudo-exemplars";
+    }
+  }
+  if (ctx.exemplarIds.length > 0) {
+    console.log(
+      `[recommendations] texture: source=${textureSource}, exemplars ${exemplarFeatures.length}/${ctx.exemplarIds.length} resolved, pool features ${poolFeatures.length}/${tracks.length}`
     );
+  }
+
+  // Distance to the NEAREST exemplar beats nearest-centroid for MULTIMODAL
+  // vibe classes: "chaotic hard bop" resolves to frenetic bop AND one cool
+  // ballad, so a candidate matching EITHER mode should score well. Averaging
+  // over exemplars (or a centroid) collapses to the empty midpoint between
+  // modes and matches nothing real — min captures "fits any anchor".
+  const textureZ = (t: SpotifyTrack): number | null => {
+    const f = features.get(t.id);
+    if (!f || refZ.length === 0) return null;
+    const z = zvec(f);
+    return Math.min(...refZ.map((r) => weightedDist(z, r)));
   };
 
   const energyActive = Math.abs(ctx.energyDial - 50) > 10;
-  const energyDist = (t: SpotifyTrack): number => {
-    const e = features.get(t.id)?.energy;
-    return e == null ? 0.25 : Math.abs(e - ctx.energyDial / 100);
+  const energyTargetZ = (ctx.energyDial / 100 - stats[energyIdx].mean) / stats[energyIdx].sd;
+  const energyZ = (t: SpotifyTrack): number | null => {
+    const f = features.get(t.id);
+    if (!f) return null;
+    return Math.abs((f.energy - stats[energyIdx].mean) / stats[energyIdx].sd - energyTargetZ);
   };
 
-  if (!ctx.target && !energyActive && !centroid) return { ranked: annotated, features };
+  const hasTexture = refZ.length >= 2;
+  if (!ctx.target && !energyActive && !hasTexture) return { ranked: annotated, features };
 
-  // Texture gate: with a resolved exemplar centroid, drop candidates that are
-  // acoustically alien to it (e.g. a rap track mis-surfaced by genre:"hard bop"
-  // search). Only fires on tracks with known features, and never on exemplars
-  // or so many that the pool can't fill — a far-but-present track beats a hole.
-  const TEXTURE_GATE = 0.42;
-  const exemplarSet = new Set(ctx.exemplarIds);
-  const gated =
-    centroid && annotated.length > 24
-      ? annotated.filter(
-          (t) =>
-            exemplarSet.has(t.id) ||
-            !features.get(t.id) ||
-            centroidDist(t) <= TEXTURE_GATE
-        )
-      : annotated;
-  const pool = gated.length >= 20 ? gated : annotated;
-
-  const head = ctx.pinFirst ? pool.slice(0, 1) : [];
-  const rest = ctx.pinFirst ? pool.slice(1) : pool;
-  // Tempo intent dominates; texture fit to exemplars and the explicit energy
-  // dial share the second key; original (tier/popularity) order breaks ties.
+  // Texture distance is a SOFT penalty in the ranking, NOT a hard gate: a rich
+  // pool naturally sinks acoustically-alien filler below the top 20, while a
+  // thin pool keeps a far track rather than under-filling — no cliff, no
+  // silent bypass. Unknown-feature tracks price at a neutral 1 std.
+  const NEUTRAL_Z = 1.0;
   const textureScore = (t: SpotifyTrack): number => {
     const parts: number[] = [];
-    if (centroid) parts.push(centroidDist(t));
-    if (energyActive) parts.push(energyDist(t));
+    if (hasTexture) parts.push(textureZ(t) ?? NEUTRAL_Z);
+    if (energyActive) parts.push(energyZ(t) ?? NEUTRAL_Z);
     return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : 0;
   };
+
+  const head = ctx.pinFirst ? annotated.slice(0, 1) : [];
+  const rest = ctx.pinFirst ? annotated.slice(1) : annotated;
   const ranked = rest
     .map((t, i) => ({
       t,
@@ -575,6 +612,8 @@ function sequenceForFlow(
   if (tracks.length < 5) return tracks;
   const known = tracks.filter((t) => features.has(t.id)).length;
   if (known < tracks.length / 2) return tracks; // not enough signal to sequence
+  const cost = (a: SpotifyTrack, b: SpotifyTrack) => transitionCost(a, b, features);
+
   // Greedy nearest-neighbor path anchored on the best-fit (first-ranked) track.
   const remaining = tracks.slice(1);
   const path = [tracks[0]];
@@ -582,13 +621,44 @@ function sequenceForFlow(
     let bestIdx = 0;
     let bestCost = Infinity;
     for (let i = 0; i < remaining.length; i++) {
-      const cost = transitionCost(path[path.length - 1], remaining[i], features);
-      if (cost < bestCost) {
-        bestCost = cost;
+      const c = cost(path[path.length - 1], remaining[i]);
+      if (c < bestCost) {
+        bestCost = c;
         bestIdx = i;
       }
     }
     path.push(remaining.splice(bestIdx, 1)[0]);
+  }
+
+  // 2-opt refinement: greedy leaves cascading bad edges (one poor early pick
+  // drags the whole tail). A few 2-opt passes reach a local optimum cheaply
+  // (~n^2/pass, n<=20). Index 0 stays fixed (the chosen opener). transitionCost
+  // is symmetric, so reversing a segment only changes its two boundary edges.
+  for (let pass = 0; pass < 6; pass++) {
+    let improved = false;
+    for (let i = 1; i < path.length - 1; i++) {
+      for (let j = i + 1; j < path.length; j++) {
+        const a = path[i - 1];
+        const b = path[i];
+        const c = path[j];
+        const d = path[j + 1]; // undefined when reversing the suffix
+        const before = cost(a, b) + (d ? cost(c, d) : 0);
+        const after = cost(a, c) + (d ? cost(b, d) : 0);
+        if (after < before - 1e-9) {
+          let lo = i;
+          let hi = j;
+          while (lo < hi) {
+            const tmp = path[lo];
+            path[lo] = path[hi];
+            path[hi] = tmp;
+            lo++;
+            hi--;
+          }
+          improved = true;
+        }
+      }
+    }
+    if (!improved) break;
   }
   return path;
 }
