@@ -11,7 +11,7 @@ import {
 } from "./spotify";
 import type { SpotifyTrack, GeneratorMode, FilterValues } from "@/types";
 import type { AudioFeatures } from "./spotify";
-import { fetchAudioFeatures, fetchDeezerBpm } from "@/lib/audio-features";
+import { fetchAudioFeatures, resolveTempo } from "@/lib/audio-features";
 import { getArtistTags, tagsHitVeto } from "@/lib/lastfm";
 
 // Map vibe keywords to Spotify genre seeds
@@ -427,21 +427,23 @@ async function annotateAndRank(
     ...ctx.exemplarIds,
   ]);
 
-  // Coverage gap-fill: tracks the features provider doesn't know (deep jazz
-  // cuts, regional releases) can still get a BPM from Deezer via their ISRC.
-  const gapFill = new Map<string, number>();
-  await Promise.all(
-    tracks
-      .filter((t) => !features.get(t.id) && t.isrc)
-      .map(async (t) => {
-        const bpm = await fetchDeezerBpm(t.isrc as string);
-        if (bpm !== null) gapFill.set(t.id, bpm);
+  // Tempo per track through a single identity-guarded path: the provider's
+  // feature tempo reconciled against Deezer's perceptual BPM, but Deezer is
+  // trusted only when the ISRC join resolves to the SAME recording — a
+  // colliding ISRC (re-issue / compilation) reads as unknown, never as a
+  // confident wrong number that could reorder a tempo-sorted playlist. Covers
+  // both the reconciliation and the coverage gap-fill (provider has no
+  // features but Deezer does, via ISRC) cases.
+  const resolvedTempos = await Promise.all(
+    tracks.map((t) =>
+      resolveTempo(features.get(t.id)?.tempo ?? null, t.isrc, {
+        title: t.name,
+        artist: t.artists[0]?.name ?? "",
       })
+    )
   );
-
-  const annotated = tracks.map((t) => {
-    const f = features.get(t.id);
-    const tempo = f?.tempo ?? gapFill.get(t.id);
+  const annotated = tracks.map((t, i) => {
+    const tempo = resolvedTempos[i];
     return tempo != null ? { ...t, tempo: Math.round(tempo) } : t;
   });
 

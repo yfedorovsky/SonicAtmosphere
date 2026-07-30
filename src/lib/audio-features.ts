@@ -35,15 +35,25 @@ const isMiss = (v: unknown): v is MissSentinel =>
 const isFeatures = (v: unknown): v is AudioFeatures =>
   !!v && typeof v === "object" && typeof (v as AudioFeatures).tempo === "number";
 
+// A Deezer track resolved by ISRC: its perceptual BPM plus the recording
+// identity (title + credited artists) used to reject colliding ISRC joins
+// before trusting that BPM.
+interface DeezerRecord {
+  bpm: number | null;
+  title: string;
+  titleShort: string;
+  artists: string[]; // primary + contributors, for a lenient identity match
+}
+
 const globalForFeatures = globalThis as unknown as {
   __saAudioFeatures?: Map<string, AudioFeatures | null>;
-  __saDeezerBpm?: Map<string, number | null>;
+  __saDeezerTrack?: Map<string, DeezerRecord | null>;
 };
 function cache(): Map<string, AudioFeatures | null> {
   return (globalForFeatures.__saAudioFeatures ??= new Map());
 }
-function deezerCache(): Map<string, number | null> {
-  return (globalForFeatures.__saDeezerBpm ??= new Map());
+function deezerCache(): Map<string, DeezerRecord | null> {
+  return (globalForFeatures.__saDeezerTrack ??= new Map());
 }
 
 // --- Provider interface (ReccoBeats is the only implementation today) --------
@@ -122,19 +132,24 @@ const reccoBeatsProvider: AudioFeatureProvider = {
 // The single swap point: replace this to change providers.
 const featureProvider: AudioFeatureProvider = reccoBeatsProvider;
 
-// --- Deezer BPM (KV-backed) --------------------------------------------------
+// --- Deezer recording lookup (KV-backed) -------------------------------------
 // Beat detectors mis-read swing/mellow material by octave or 1.5x. Deezer's
-// perceptual BPM (keyed by ISRC) breaks the tie when the two disagree.
-export async function fetchDeezerBpm(isrc: string): Promise<number | null> {
+// perceptual BPM (keyed by ISRC) breaks the tie — but ONLY when the ISRC join
+// resolves to the SAME recording. ISRCs get reused and mis-assigned across
+// compilations and re-issues, so we fetch Deezer's title + credited artists
+// alongside the BPM and refuse to attach a BPM whose recording identity does
+// not match the Spotify track being annotated (a colliding join must read as
+// "unknown tempo", never as a confident wrong number).
+async function fetchDeezerRecord(isrc: string): Promise<DeezerRecord | null> {
   const l1 = deezerCache().get(isrc);
   if (l1 !== undefined) return l1;
 
-  const kvKey = `sa:bpm:${isrc}`;
-  const l2 = await kvGet<number | MissSentinel>(kvKey);
+  const kvKey = `sa:dz:${isrc}`;
+  const l2 = await kvGet<DeezerRecord | MissSentinel>(kvKey);
   if (l2 !== null) {
-    const bpm = isMiss(l2) ? null : (l2 as number);
-    deezerCache().set(isrc, bpm);
-    return bpm;
+    const rec = isMiss(l2) ? null : (l2 as DeezerRecord);
+    deezerCache().set(isrc, rec);
+    return rec;
   }
 
   const controller = new AbortController();
@@ -143,15 +158,73 @@ export async function fetchDeezerBpm(isrc: string): Promise<number | null> {
     const res = await fetch(`${DEEZER_ISRC_URL}${isrc}`, { signal: controller.signal, cache: "no-store" });
     if (!res.ok) return null; // transient — leave uncached for retry
     const data = await res.json();
-    const bpm = typeof data?.bpm === "number" && data.bpm >= 40 && data.bpm <= 250 ? data.bpm : null;
-    deezerCache().set(isrc, bpm);
-    await kvSet(kvKey, bpm ?? MISS, BPM_KV_TTL_S);
-    return bpm;
+    // Deezer answers an unknown ISRC with {error:{...}} at HTTP 200 — a
+    // confirmed miss: cache it so we never re-ask.
+    if (!data || typeof data !== "object" || data.error || typeof data.title !== "string") {
+      deezerCache().set(isrc, null);
+      await kvSet(kvKey, MISS, BPM_KV_TTL_S);
+      return null;
+    }
+    const bpm =
+      typeof data.bpm === "number" && data.bpm >= 40 && data.bpm <= 250 ? data.bpm : null;
+    const contributors: string[] = Array.isArray(data.contributors)
+      ? data.contributors
+          .map((c: unknown) =>
+            c && typeof c === "object" && typeof (c as { name?: unknown }).name === "string"
+              ? (c as { name: string }).name
+              : null
+          )
+          .filter((n: string | null): n is string => !!n)
+      : [];
+    const primary =
+      data.artist && typeof data.artist === "object" && typeof data.artist.name === "string"
+        ? (data.artist.name as string)
+        : null;
+    const rec: DeezerRecord = {
+      bpm,
+      title: data.title,
+      titleShort: typeof data.title_short === "string" ? data.title_short : data.title,
+      artists: [...new Set([primary, ...contributors].filter((n): n is string => !!n))],
+    };
+    deezerCache().set(isrc, rec);
+    await kvSet(kvKey, rec, BPM_KV_TTL_S);
+    return rec;
   } catch {
     return null; // network/timeout — leave uncached
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Normalizers mirror songKey in recommendations.ts: strip version suffixes and
+// punctuation so "Song (2011 Remaster)" / "Song - Live" reduce to "song".
+const normArtist = (s: string) =>
+  s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const normTitle = (s: string) =>
+  normArtist(s.replace(/\s*[([].*?[)\]]\s*/g, " ").split(" - ")[0]);
+
+/**
+ * Lenient recording-identity match: BOTH a title and an artist must line up
+ * (equality, or containment when the shorter side is >= 4 chars so short
+ * substrings can't coincidentally match). A genuine ISRC collision differs on
+ * both title and artist, so it fails; a legit re-release or remaster of the
+ * same recording still passes. Unverifiable expectations (empty title/artist)
+ * accept, so the guard only ever removes KNOWN-bad joins.
+ */
+export function deezerIdentityMatches(
+  rec: { title: string; titleShort: string; artists: string[] },
+  expected: { title: string; artist: string }
+): boolean {
+  const eT = normTitle(expected.title);
+  const eA = normArtist(expected.artist);
+  if (!eT || !eA) return true; // can't verify → don't discard (conservative)
+  const contains = (a: string, b: string) =>
+    a === b || (b.length >= 4 && a.includes(b)) || (a.length >= 4 && b.includes(a));
+  const titleOk = [normTitle(rec.title), normTitle(rec.titleShort)]
+    .filter(Boolean)
+    .some((d) => contains(d, eT));
+  const artistOk = rec.artists.map(normArtist).filter(Boolean).some((d) => contains(d, eA));
+  return titleOk && artistOk;
 }
 
 function reconcileTempo(reccoTempo: number, deezerBpm: number | null): number {
@@ -160,10 +233,41 @@ function reconcileTempo(reccoTempo: number, deezerBpm: number | null): number {
   return Math.abs(reccoTempo - deezerBpm) > tolerance ? deezerBpm : reccoTempo;
 }
 
-const featKey = (id: string) => `sa:feat:${id}`;
+/**
+ * Final tempo for a track: the provider's feature tempo reconciled against
+ * Deezer's perceptual BPM, trusting Deezer only when the ISRC join resolves to
+ * the same recording (deezerIdentityMatches). Returns null when neither source
+ * knows. This is the single identity-guarded entry point for track tempo —
+ * both the reconciliation (feature + Deezer) and the gap-fill (Deezer only,
+ * no feature) cases flow through it, so a colliding ISRC can never silently
+ * reorder a tempo-sorted playlist.
+ */
+export async function resolveTempo(
+  featureTempo: number | null,
+  isrc: string | undefined,
+  expected: { title: string; artist: string }
+): Promise<number | null> {
+  let deezerBpm: number | null = null;
+  if (isrc) {
+    const rec = await fetchDeezerRecord(isrc);
+    if (rec && rec.bpm !== null && deezerIdentityMatches(rec, expected)) {
+      deezerBpm = rec.bpm;
+    }
+  }
+  if (featureTempo !== null) return reconcileTempo(featureTempo, deezerBpm);
+  return deezerBpm; // gap-fill, or null when neither source knows
+}
 
-// Fetch misses from the provider, reconcile tempo, and populate L1 + KV
-// (including confirmed misses so we never re-query for them).
+// v2: features are cached RAW (unreconciled). Tempo reconciliation against
+// Deezer needs the track's recording identity to reject colliding ISRC joins,
+// and that identity only exists at the ranking call site — so tempo is resolved
+// there (resolveTempo), not here. The bump abandons v1's reconciled-without-
+// guard values (re-fetched free from ReccoBeats).
+const featKey = (id: string) => `sa:feat:v2:${id}`;
+
+// Fetch misses from the provider and populate L1 + KV (including confirmed
+// misses so we never re-query for them). Features are stored exactly as the
+// provider returns them; tempo is reconciled with Deezer at the call site.
 async function fetchFromProvider(ids: string[]): Promise<void> {
   const batches: string[][] = [];
   for (let i = 0; i < ids.length; i += BATCH_SIZE) batches.push(ids.slice(i, i + BATCH_SIZE));
@@ -173,20 +277,12 @@ async function fetchFromProvider(ids: string[]): Promise<void> {
       const raw = await featureProvider.fetchBatch(batch);
       if (raw.length === 0) return; // failed/empty batch — cache nothing, retry later
 
-      // Tempo cross-check (deduped by ISRC — re-releases share a recording).
-      const uniqueIsrcs = [...new Set(raw.map((r) => r.isrc).filter((i): i is string => !!i))];
-      const bpmByIsrc = new Map(
-        await Promise.all(uniqueIsrcs.map(async (isrc) => [isrc, await fetchDeezerBpm(isrc)] as const))
-      );
-
       const returned = new Set<string>();
       const writes: Promise<void>[] = [];
-      for (const { spotifyId, features, isrc } of raw) {
-        const bpm = isrc ? bpmByIsrc.get(isrc) ?? null : null;
-        const reconciled = { ...features, tempo: reconcileTempo(features.tempo, bpm) };
-        cache().set(spotifyId, reconciled);
+      for (const { spotifyId, features } of raw) {
+        cache().set(spotifyId, features);
         returned.add(spotifyId);
-        writes.push(kvSet(featKey(spotifyId), reconciled, FEATURE_KV_TTL_S));
+        writes.push(kvSet(featKey(spotifyId), features, FEATURE_KV_TTL_S));
       }
       // Requested-but-not-returned = confirmed miss: cache so we never re-ask.
       for (const id of batch) {
