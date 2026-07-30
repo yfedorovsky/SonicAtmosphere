@@ -37,9 +37,20 @@ node scripts/eval-pool.mjs http://localhost:3000 3
 Generates each prompt 3× (pooling keeps the set fair to future variants), unions
 the candidates, and writes `eval/judgments.template.json`.
 
-**2. Label it.** Copy the template to `eval/judgments.json` and set each track's
-`label` to `relevant`, `borderline` (counts 0.5), or `irrelevant`. This is the
-one-time human effort; it compounds — every future change is scored against it.
+**2. Label it.** Easiest path — build the offline labeling UI:
+
+```bash
+node scripts/build-label-tool.mjs
+```
+
+This bakes the pool + prompt text into a self-contained `eval/label.html` (open
+in any browser, no server/network): click **Rel/Bor/Irr** or hover a row and
+press **1/2/3** (auto-advances), progress autosaves to localStorage, then
+**Export** downloads the finished file — save it as `eval/judgments.json`. It
+skips prompts with no pooled candidates, and **Import** resumes a partial file.
+Re-run it after re-pooling. (Or hand-edit the template: set each track's `label`
+to `relevant`, `borderline` (counts 0.5), or `irrelevant`.) This is the one-time
+human effort; it compounds — every future change is scored against it.
 
 **3. Score the current pipeline:**
 

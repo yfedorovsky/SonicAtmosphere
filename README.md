@@ -40,11 +40,14 @@ In the Spotify app dashboard, add this redirect URI: `http://127.0.0.1:3000/api/
 | Variable | Required | Purpose |
 |---|---|---|
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | yes | Spotify app credentials (search, OAuth, export) |
-| `ANTHROPIC_API_KEY` | yes | Auto-titling, per-track rationale, Song-mode similarity |
+| `ANTHROPIC_API_KEY` | yes | Grounded neighborhood generation (all modes, via forced tool-use), auto-titling, per-track rationale |
 | `SESSION_SECRET` | yes | Signs the anonymous session cookie and encrypts Spotify tokens at rest (`openssl rand -base64 32`) |
 | `NEXT_PUBLIC_APP_URL` | yes | Public origin, used for the OAuth redirect (local: `http://127.0.0.1:3000`) |
 | `DATABASE_URL` | prod only | Postgres connection string. Unset locally → embedded PGlite |
 | `CRON_SECRET` | prod only | Protects `/api/cron/refresh`; Vercel sends it automatically for cron invocations |
+| `LASTFM_API_KEY` | optional | last.fm crowd-tag contrast-class veto. Fail-soft: absent → veto simply off (free key at last.fm/api) |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | optional | Upstash Redis (Vercel KV): L2 search/tag cache + the daily budget counter. Fail-soft: absent → in-process caches only, no daily cap (`UPSTASH_REDIS_REST_*` also accepted) |
+| `SPOTIFY_DAILY_CALL_BUDGET` | optional | Self-imposed daily Spotify-call ceiling before degrading to keyword fallback (default 2000; requires KV). Lower while load-testing/evaluating |
 
 ## Database
 
