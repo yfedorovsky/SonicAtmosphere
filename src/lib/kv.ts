@@ -63,6 +63,18 @@ export async function kvGet<T>(key: string): Promise<T | null> {
   }
 }
 
+/** Batch get. Returns an array aligned to `keys`; misses/no-KV/errors → null. */
+export async function kvMGet<T>(keys: string[]): Promise<(T | null)[]> {
+  const redis = client();
+  if (!redis || keys.length === 0) return keys.map(() => null);
+  try {
+    const values = (await redis.mget<T[]>(...keys)) as (T | null)[];
+    return keys.map((_, i) => values?.[i] ?? null);
+  } catch {
+    return keys.map(() => null);
+  }
+}
+
 /** Set a JSON value with a TTL (seconds). No-ops on no-KV / any error. */
 export async function kvSet<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
   const redis = client();
