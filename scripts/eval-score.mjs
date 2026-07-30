@@ -48,7 +48,7 @@ const baseUrl = process.argv[2] ?? "http://localhost:3000";
 const { prompts } = JSON.parse(readFileSync("eval/prompts.json", "utf8"));
 const judgments = loadJudgments();
 
-const { run, degraded } = await generateAll(baseUrl, prompts);
+const { run, meta, degraded } = await generateAll(baseUrl, prompts);
 if (degraded) console.error(`WARNING: ${degraded} prompt(s) returned degraded results — scores unreliable.`);
 
 const scores = scoreRun(run, judgments);
@@ -65,5 +65,7 @@ if (scored < Object.keys(judgments).length) {
 mkdirSync("eval/runs", { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const outPath = `eval/runs/run-${stamp}.json`;
-writeFileSync(outPath, JSON.stringify({ run, meanPAt20: ci.mean, ci }, null, 2));
+// Save `meta` (track name/artist) too so the pairwise LLM judge can read the
+// playlists without regenerating.
+writeFileSync(outPath, JSON.stringify({ run, meta, meanPAt20: ci.mean, ci }, null, 2));
 console.log(`\nSaved run -> ${outPath}  (use with --compare to gate the next change)`);

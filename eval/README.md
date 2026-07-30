@@ -60,6 +60,30 @@ node scripts/eval-score.mjs --compare eval/runs/<main>.json eval/runs/<change>.j
 The verdict is **SHIP** only if the paired-bootstrap CI of (change − main) is
 wholly above 0. Otherwise the difference is within noise — do not ship on it.
 
+## Pairwise LLM judge (optional supplement)
+
+To compare two runs *qualitatively* without hand-labeling every track:
+
+```bash
+node --env-file=.env scripts/eval-judge.mjs eval/runs/<A>.json eval/runs/<B>.json
+```
+
+An independent model (Haiku — deliberately different and smaller than the
+`claude-opus-5` neighborhood generator, to avoid self-preference bias) judges
+each prompt's two playlists **pairwise**, **twice with the order swapped**, and
+counts only **consistent** verdicts (position-biased pairs are discarded). It
+answers "which is better", never "how good on a 1–10 scale" (absolute LLM scores
+drift and compress; pairwise with order-swapping tracks human preference far
+better — Zheng et al. 2023).
+
+This is a **supplement, not the gate**: `eval-score --compare` (P@20 +
+paired-bootstrap CI against the human judgment set) decides shipping. Use the
+judge for a fast read and to triage which prompts to hand-inspect.
+
+**Validate it periodically**: hand-label ~50 pairs yourself, compute
+judge-vs-human agreement (Cohen's κ). If κ drops below ~0.6, fix the judge
+prompt in `eval-judge.mjs` before trusting its verdicts again.
+
 ## Notes
 
 - Re-pool (step 1) after big pipeline changes so the judgment set covers newly
