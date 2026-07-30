@@ -43,6 +43,10 @@ ui_code.html
 # local embedded Postgres (PGlite) data
 /.pglite/
 
+# eval generated artifacts (regenerable; labeled eval/judgments.json IS committed)
+/eval/label.html
+/eval/judgments.template.json
+
 # vercel
 .vercel
 
