@@ -19,8 +19,12 @@ import { kvIncr } from "@/lib/kv";
 // local dev and the eval harness, which have no KV, are unaffected). The cap is
 // env-tunable via SPOTIFY_DAILY_CALL_BUDGET; lower it while load-testing.
 
-const DEFAULT_BUDGET = 6000; // ~240 fully-uncached generations/day — far above
-// real solo-app traffic, but a runaway automated loop hits it fast.
+// ~80 fully-uncached generations/day. Calibrated 2026-07-30: a ~2.8k-call eval
+// run tripped Spotify's dev-mode HARD daily lockout (~23h), so the real ceiling
+// is ≈2.5–3k search calls/day. The cap must sit BELOW that to degrade at OUR
+// soft wall instead of Spotify's hard one — 6000 was above the ceiling and
+// never fired. Raise this only after observing a clean full-day quota.
+const DEFAULT_BUDGET = 2000;
 const COUNTER_TTL_S = 36 * 60 * 60; // 36h — comfortably outlives a UTC day.
 
 function dailyBudget(): number {
