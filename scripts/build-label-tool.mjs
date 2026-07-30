@@ -15,6 +15,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 const { prompts } = JSON.parse(readFileSync("eval/prompts.json", "utf8"));
 const pool = JSON.parse(readFileSync("eval/judgments.template.json", "utf8"));
 
+// Drop prompts with no pooled candidates (e.g. artist prompts that hit the
+// quota wall mid-run) so the labeler only sees things they can actually label.
+const skipped = Object.keys(pool).filter((id) => Object.keys(pool[id]).length === 0);
+for (const id of skipped) delete pool[id];
+if (skipped.length) console.error(`Skipped ${skipped.length} empty prompt(s): ${skipped.join(", ")}`);
+
 const promptMeta = {};
 for (const p of prompts) promptMeta[p.id] = { text: p.text, mode: p.mode, difficulty: p.difficulty };
 
