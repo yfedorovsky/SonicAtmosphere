@@ -10,8 +10,11 @@
 // Fail-soft: with no LASTFM_API_KEY (or any error) it returns [] and the veto
 // simply doesn't fire — the pipeline behaves exactly as before.
 
+import { kvGet, kvSet } from "@/lib/kv";
+
 const LASTFM_API = "https://ws.audioscrobbler.com/2.0/";
-const TTL_MS = 24 * 60 * 60 * 1000; // artists' tags are stable — cache a day
+const TTL_MS = 24 * 60 * 60 * 1000; // L1: artists' tags are stable — cache a day
+const KV_TTL_S = 7 * 24 * 60 * 60; // L2: 7d — tags change even less than search
 const CACHE_MAX = 2000;
 const REQUEST_TIMEOUT_MS = 4_000;
 const MIN_TAG_COUNT = 10; // last.fm tag "count" is 0..100 normalized popularity
@@ -34,6 +37,14 @@ export async function getArtistTags(artist: string): Promise<string[]> {
   const cacheKey = artist.trim().toLowerCase();
   const hit = cache().get(cacheKey);
   if (hit && hit.expiresAt > Date.now()) return hit.tags;
+
+  // L2 (persistent KV): artist tags fetched by any instance are reused across
+  // cold starts, sparing last.fm rate limits. No-ops without a KV store.
+  const l2 = await kvGet<string[]>(`sa:lfm:${cacheKey}`);
+  if (l2 !== null) {
+    cache().set(cacheKey, { tags: l2, expiresAt: Date.now() + TTL_MS });
+    return l2;
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -66,6 +77,7 @@ export async function getArtistTags(artist: string): Promise<string[]> {
       if (oldest !== undefined) cache().delete(oldest);
     }
     cache().set(cacheKey, { tags, expiresAt: Date.now() + TTL_MS });
+    await kvSet(`sa:lfm:${cacheKey}`, tags, KV_TTL_S);
     return tags;
   } catch {
     return []; // network/timeout/parse — fail soft

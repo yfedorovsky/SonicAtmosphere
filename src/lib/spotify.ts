@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import type { SpotifyTrack } from "@/types";
+import { kvGet, kvSet } from "@/lib/kv";
 
 const SPOTIFY_API = "https://api.spotify.com/v1";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -70,8 +71,9 @@ const searchCacheStore = globalThis as unknown as {
   __saSearchCache?: Map<string, { data: unknown; expiresAt: number }>;
   __saSearchInflight?: Map<string, Promise<unknown>>;
 };
-const SEARCH_CACHE_TTL_MS = 60 * 60 * 1000; // 1h; instance usually recycles first
+const SEARCH_CACHE_TTL_MS = 60 * 60 * 1000; // L1: 1h; instance usually recycles first
 const SEARCH_CACHE_MAX = 800;
+const SEARCH_KV_TTL_S = 24 * 60 * 60; // L2: 24h — catalog search is stable day to day
 
 function searchCache(): Map<string, { data: unknown; expiresAt: number }> {
   return (searchCacheStore.__saSearchCache ??= new Map());
@@ -95,14 +97,27 @@ async function cachedSearch<T>(
   const pending = inflight.get(key);
   if (pending) return pending as Promise<T>;
 
+  const setL1 = (value: T) => {
+    if (cache.size >= SEARCH_CACHE_MAX) {
+      const oldest = cache.keys().next().value; // Map preserves insertion order
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, { data: value, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
+  };
+
   const run = (async () => {
+    // L2 (persistent KV): survives serverless cold starts, so a query fetched
+    // by any instance in the last 24h is reused instead of burning Spotify
+    // quota. No-ops (returns null) when no KV store is configured.
+    const l2 = await kvGet<T>(`sa:search:${key}`);
+    if (l2 !== null) {
+      setL1(l2);
+      return l2;
+    }
     const { ok, value } = await fetcher();
     if (ok) {
-      if (cache.size >= SEARCH_CACHE_MAX) {
-        const oldest = cache.keys().next().value; // Map preserves insertion order
-        if (oldest !== undefined) cache.delete(oldest);
-      }
-      cache.set(key, { data: value, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
+      setL1(value);
+      await kvSet(`sa:search:${key}`, value, SEARCH_KV_TTL_S);
     }
     return value;
   })();
