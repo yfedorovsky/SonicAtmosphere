@@ -732,42 +732,58 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
     console.warn("[recommendations] ANTHROPIC_API_KEY not set — LLM neighborhood unavailable");
     return null;
   }
-  try {
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const response = await anthropic.messages.create({
-      model: "claude-opus-5",
-      max_tokens: 2000,
-      messages: [{ role: "user", content }],
-    });
-    if (response.stop_reason === "refusal") {
-      console.error("[recommendations] neighborhood request refused by model");
-      return null;
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const strings = (v: unknown, max: number) =>
+    Array.isArray(v)
+      ? v.filter((x): x is string => typeof x === "string").slice(0, max)
+      : [];
+
+  // Up to two attempts. opus-5 spends most of its output budget on internal
+  // reasoning (~1.4–2k tokens observed for this task) BEFORE emitting the JSON,
+  // so a tight max_tokens intermittently left no room for the JSON — it came
+  // back empty or truncated ("Unterminated string"), the parse threw, and the
+  // whole generation fell back to degraded keyword search. Give the JSON ample
+  // headroom AND retry once, since the failure is stochastic per run.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await anthropic.messages.create({
+        model: "claude-opus-5",
+        max_tokens: 4096, // reasoning + the JSON both fit; 2000 did not
+        messages: [{ role: "user", content }],
+      });
+      if (response.stop_reason === "refusal") {
+        console.error("[recommendations] neighborhood request refused by model");
+        return null; // a refusal won't change on retry
+      }
+      const textBlock = response.content.find((c) => c.type === "text");
+      const text = textBlock && textBlock.type === "text" ? textBlock.text.trim() : "";
+      // Salvage the outermost {...} so stray prose or code fences can't break
+      // the parse. Empty text (reasoning ate the whole budget) falls through
+      // to a retry rather than failing outright.
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start !== -1 && end > start) {
+        const parsed = JSON.parse(text.slice(start, end + 1));
+        return {
+          artists: strings(parsed.artists, 16),
+          genres: strings(parsed.genres, 3),
+          keywords: strings(parsed.keywords, 2),
+          tracks: strings(parsed.tracks, 6),
+          avoidTags: strings(parsed.avoid_tags ?? parsed.avoidTags, 6),
+        };
+      }
+      console.warn(
+        `[recommendations] neighborhood produced no parseable JSON (attempt ${attempt}, stop_reason=${response.stop_reason}, len=${text.length})`
+      );
+    } catch (err) {
+      console.warn(
+        `[recommendations] neighborhood expansion failed (attempt ${attempt}):`,
+        err instanceof Error ? err.message : err
+      );
     }
-    const textBlock = response.content.find((c) => c.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      console.error("[recommendations] neighborhood response had no text block");
-      return null;
-    }
-    let jsonStr = textBlock.text.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-    const parsed = JSON.parse(jsonStr);
-    const strings = (v: unknown, max: number) =>
-      Array.isArray(v)
-        ? v.filter((x): x is string => typeof x === "string").slice(0, max)
-        : [];
-    return {
-      artists: strings(parsed.artists, 16),
-      genres: strings(parsed.genres, 3),
-      keywords: strings(parsed.keywords, 2),
-      tracks: strings(parsed.tracks, 6),
-      avoidTags: strings(parsed.avoid_tags ?? parsed.avoidTags, 6),
-    };
-  } catch (err) {
-    console.error("[recommendations] neighborhood expansion failed:", err);
-    return null;
   }
+  console.error("[recommendations] neighborhood unavailable after retries — degrading");
+  return null;
 }
 
 // Resolve "Title | Artist" exemplar entries to real tracks: exact-ish search,
