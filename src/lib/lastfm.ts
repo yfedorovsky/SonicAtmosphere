@@ -87,18 +87,26 @@ export async function getArtistTags(artist: string): Promise<string[]> {
 }
 
 const stripTag = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const tokenCount = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).length;
 
 /**
- * True if any of the artist's tags is IN the veto set. Match is one-directional
- * — a tag is vetoed only if it CONTAINS a veto term (after stripping separators)
- * — so a veto of "smooth jazz" hits tags "smooth jazz" / "smooth-jazz" /
- * "smooth jazz fusion" but NOT the broad, legitimate tag "jazz". (The reverse,
- * tag ⊆ veto, would wrongly veto every jazz artist against a "smooth jazz"
- * contrast class.)
+ * True if any of the artist's tags is IN the veto set. Matching depends on the
+ * avoid-term's specificity:
+ *  - MULTI-WORD avoid-terms ("smooth jazz") match by substring, so they catch
+ *    variants ("smooth-jazz", "smooth jazz fusion") but never the broad tag
+ *    "jazz" (a short tag can't contain a longer phrase).
+ *  - SINGLE-TOKEN avoid-terms ("house") match a tag only EXACTLY. A generic
+ *    token would otherwise substring-match every compound that embeds it and
+ *    wrongly veto adjacent-but-legit styles — e.g. avoiding "house" must NOT
+ *    veto "tech house" / "acid house" from a techno neighborhood.
  */
 export function tagsHitVeto(tags: string[], veto: string[]): boolean {
   if (tags.length === 0 || veto.length === 0) return false;
-  const vetoNorm = veto.map(stripTag).filter((v) => v.length >= 3);
   const tagNorm = tags.map(stripTag).filter(Boolean);
-  return tagNorm.some((t) => vetoNorm.some((v) => t.includes(v)));
+  const rules = veto
+    .map((v) => ({ norm: stripTag(v), multiword: tokenCount(v) >= 2 }))
+    .filter((r) => r.norm.length >= 3);
+  return tagNorm.some((t) =>
+    rules.some((r) => (r.multiword ? t.includes(r.norm) : t === r.norm))
+  );
 }
