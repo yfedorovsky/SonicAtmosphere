@@ -12,6 +12,7 @@ import {
 import type { SpotifyTrack, GeneratorMode, FilterValues } from "@/types";
 import type { AudioFeatures } from "./spotify";
 import { fetchAudioFeatures, fetchDeezerBpm } from "@/lib/audio-features";
+import { getArtistTags, tagsHitVeto } from "@/lib/lastfm";
 
 // Map vibe keywords to Spotify genre seeds
 const VIBE_TO_GENRES: Record<string, string[]> = {
@@ -711,6 +712,10 @@ interface Neighborhood {
   // express within-catalog mood: a jazz giant's most-streamed tracks are their
   // mellowest, so "chaotic hard bop" needs Claude to name the burners.
   tracks?: string[];
+  // The CONTRAST CLASS: crowd-tag/genre terms a track in this vibe should NOT
+  // carry ("smooth jazz", "lounge" for a hard-bop prompt). Filler sits
+  // acoustically central so texture can't reject it — human tags can.
+  avoidTags?: string[];
 }
 
 // One JSON round trip to Claude. Opus-tier knowledge matters: obscure artists
@@ -750,6 +755,7 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
       genres: strings(parsed.genres, 3),
       keywords: strings(parsed.keywords, 2),
       tracks: strings(parsed.tracks, 6),
+      avoidTags: strings(parsed.avoid_tags ?? parsed.avoidTags, 6),
     };
   } catch (err) {
     console.error("[recommendations] neighborhood expansion failed:", err);
@@ -854,6 +860,40 @@ async function resolveAndRank(
         Math.abs(b.t.popularity - opts.anchorPopularity)
   );
 
+  // Second-axis veto: crowd tags say a tier-1 (genre/keyword) candidate is in
+  // the contrast class the prompt excluded (e.g. a "smooth jazz" artist in a
+  // hard-bop list). Texture can't catch this — filler sits acoustically
+  // central (hubness) — but human labels can. Scoped to tier 1 (the source of
+  // filler; named-artist/exemplar tiers are trusted) to bound last.fm calls.
+  // Fail-soft: no LASTFM_API_KEY → getArtistTags returns [] → no vetoes.
+  const vetoedIds = new Set<string>();
+  const avoidTags = (neighborhood.avoidTags ?? []).map((t) => t.toLowerCase().trim()).filter(Boolean);
+  if (avoidTags.length > 0 && process.env.LASTFM_API_KEY) {
+    const tierOneArtists = [
+      ...new Set(
+        unique
+          .filter((u) => u.tier === 1)
+          .map((u) => u.t.artists[0]?.name)
+          .filter((n): n is string => !!n)
+      ),
+    ];
+    const tagLists = await Promise.all(tierOneArtists.map((a) => getArtistTags(a)));
+    const vetoedArtists = new Set<string>();
+    tierOneArtists.forEach((a, i) => {
+      if (tagsHitVeto(tagLists[i], avoidTags)) vetoedArtists.add(normalize(a));
+    });
+    if (vetoedArtists.size > 0) {
+      for (const { t, tier } of unique) {
+        if (tier === 1 && vetoedArtists.has(normalize(t.artists[0]?.name ?? ""))) {
+          vetoedIds.add(t.id);
+        }
+      }
+      console.log(
+        `[recommendations] contrast-class veto dropped ${vetoedIds.size} tier-1 track(s) via last.fm tags`
+      );
+    }
+  }
+
   // Count every credited artist so features can't flood the list either.
   // Exemplars (tierZeroTracks) are hand-picked mood anchors — exempt them so
   // a tight per-artist cap can't evict them in favour of catalog filler.
@@ -864,6 +904,7 @@ async function resolveAndRank(
   const tierOneCap = opts.tierOneCap ?? 4;
   let tierOneSlots = 0;
   for (const { t, tier } of unique) {
+    if (vetoedIds.has(t.id)) continue;
     if (tier === 1 && tierOneSlots >= tierOneCap) continue;
     const keys = t.artists.length > 0 ? t.artists.map((a) => a.id) : [t.id];
     const isExemplar = protectedIds.has(t.id);
@@ -913,10 +954,11 @@ Name real artists whose actual music delivers this vibe. Rules:
 - Prefer credible artists a music critic would name; never content-farm, tribute, karaoke, or "study beats" channel acts.
 - Vivid descriptors ("chaotic", "gentle", "hypnotic", "frantic") are the PRIMARY selection signal and outrank genre-canon defaults — a canonical-but-calm classic is a wrong pick when the listener asked for chaos.
 - Translate scene language into ARRANGEMENT qualities, not just tempo: layered crowds = interlocking polyrhythms and dialoguing drummers; abrupt city noise = staccato horn stabs and sharp syncopation; constant motion = urgent walking basslines and cascading comping. Choose artists and exemplar tracks famous for those textures.
-- An artist's most popular tracks are often their mellowest — when the description implies a specific energy, tempo, or intensity, the "tracks" list must name individual songs famous for exactly that quality, not the artist's biggest hits.${tempoHint(tempoTarget)}
+- An artist's most popular tracks are often their mellowest — when the description implies a specific energy, tempo, or intensity, the "tracks" list must name individual songs famous for exactly that quality, not the artist's biggest hits.
+- "avoid_tags": name the CONTRAST CLASS — the crowd tags/genres that a track fitting this vibe should NOT carry. Pick the adjacent-but-wrong styles that generic search will wrongly surface (e.g. for chaotic hard bop: "smooth jazz", "lounge", "easy listening", "chillout"; for driving techno: "ambient", "downtempo"). These become a hard veto against mislabeled filler, so choose confidently-wrong styles, not merely different ones.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
-{"artists": ["...16 distinct artists spanning the neighborhood — enough to fill a 20-track playlist with no repeats..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."]}`
+{"artists": ["...16 distinct artists spanning the neighborhood — enough to fill a 20-track playlist with no repeats..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."], "avoid_tags": ["...up to 6 contrast-class tags this vibe must NOT include..."]}`
   );
 
   if (neighborhood && (neighborhood.artists.length > 0 || neighborhood.genres.length > 0)) {
