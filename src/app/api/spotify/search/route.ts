@@ -76,12 +76,22 @@ export async function GET(request: NextRequest) {
   const source = accessToken ? "user-token" : "client-credentials";
   // sequence=0 keeps fit-ranked order for callers that consume the list
   // prefix as best-N candidates (replace weakest).
+  // "Longer playlist" multi-pass: the client sends the artists already added so
+  // each pass returns a fresh neighborhood (see recommendations.askNeighborhood).
+  const excludeArtists = (searchParams.get("excludeArtists") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 40);
   const { tracks, degraded } = await generateRecommendations(
     token,
     query,
     type as GeneratorMode,
     filters,
-    { sequence: request.nextUrl.searchParams.get("sequence") !== "0" }
+    {
+      sequence: request.nextUrl.searchParams.get("sequence") !== "0",
+      excludeArtists,
+    }
   );
 
   // If recommendations returned empty, fall back to keyword search — UNLESS the

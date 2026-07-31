@@ -15,6 +15,20 @@ import { usePlaylistStore } from "@/stores/playlist-store";
 import type { GeneratorMode, FilterValues, SpotifyTrack } from "@/types";
 import { DEFAULT_FILTERS, suggestMoodsFromPrompt } from "@/types";
 
+// "Playlist length" presets → target track counts (~3 min/track). Longer targets
+// are filled by running the generator multiple times, each pass excluding the
+// artists already added, paced so Spotify's rolling rate limit stays clear.
+const LENGTH_TARGET: Record<"1h" | "2h" | "3h", number> = { "1h": 20, "2h": 40, "3h": 60 };
+const PASS_GAP_MS = 18_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Cross-pass dedup key: normalized primary artist | version-stripped title.
+const trackKey = (t: SpotifyTrack) =>
+  `${(t.artists[0]?.name ?? "").toLowerCase().trim()}|${t.name
+    .toLowerCase()
+    .replace(/\s*[([].*?[)\]]\s*/g, " ")
+    .split(" - ")[0]
+    .trim()}`;
+
 export default function GeneratorPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-background" />}>
@@ -39,6 +53,9 @@ function GeneratorContent() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [suggestedMoods, setSuggestedMoods] = useState<string[]>([]);
+  const [length, setLength] = useState<"1h" | "2h" | "3h">("1h");
+  // Non-null while filling a longer playlist across paced passes.
+  const [fillProgress, setFillProgress] = useState<{ have: number; target: number } | null>(null);
   const addRecentPrompt = useDraftsStore((s) => s.addRecentPrompt);
   const currentDraftId = usePlaylistStore((s) => s.currentDraft.id);
   const setGenerationContext = usePlaylistStore((s) => s.setGenerationContext);
@@ -53,25 +70,25 @@ function GeneratorContent() {
     runCountRef.current += 1;
     setIsLoading(true);
     setHasSearched(true);
+    setFillProgress(null);
     addRecentPrompt(prompt.trim());
 
-    // Generate context-aware mood suggestions from prompt
+    // Context-aware mood suggestions; auto-select if the user set none.
     const suggested = suggestMoodsFromPrompt(prompt);
     setSuggestedMoods(suggested);
-
-    // Auto-select suggested moods if user hasn't manually set any
     let activeFilters = filters;
     if (filters.moods.length === 0 && suggested.length > 0) {
       activeFilters = { ...filters, moods: suggested };
       setFilters(activeFilters);
     }
     setLastGenerated(JSON.stringify({ mode, filters: activeFilters }));
-
-    // Stamp the working draft with what produced it, so the saved draft can
-    // explain and re-run its generation later.
+    // Stamp the working draft with what produced it, so it can re-run later.
     setGenerationContext({ prompt: prompt.trim(), mode, filters: activeFilters });
 
-    try {
+    // One generation pass. excludeArtists steers each pass toward fresh names.
+    const runPass = async (
+      excludeArtists: string[]
+    ): Promise<{ tracks: SpotifyTrack[]; degraded: boolean } | null> => {
       const params = new URLSearchParams({
         q: prompt.trim(),
         type: mode,
@@ -83,28 +100,64 @@ function GeneratorContent() {
         instrumentalness: String(activeFilters.instrumentalness),
         draftId: currentDraftId,
       });
-      if (activeFilters.moods.length > 0) {
-        params.set("moods", activeFilters.moods.join(","));
-      }
-      if (isRegenerate) {
-        params.set("regen", "1");
-      }
-      const res = await fetch(`/api/spotify/search?${params}`);
-      if (res.ok) {
+      if (activeFilters.moods.length > 0) params.set("moods", activeFilters.moods.join(","));
+      if (isRegenerate) params.set("regen", "1");
+      if (excludeArtists.length > 0)
+        params.set("excludeArtists", excludeArtists.slice(0, 40).join(","));
+      try {
+        const res = await fetch(`/api/spotify/search?${params}`);
+        if (!res.ok) return null;
         const data = await res.json();
-        setResults(data.tracks || []);
-        setDegraded(Boolean(data.degraded));
-      } else {
+        return { tracks: (data.tracks || []) as SpotifyTrack[], degraded: Boolean(data.degraded) };
+      } catch {
+        return null;
+      }
+    };
+
+    const target = LENGTH_TARGET[length];
+    try {
+      const first = await runPass([]);
+      setIsLoading(false);
+      if (!first) {
         setResults([]);
         setDegraded(false);
+        return;
       }
-    } catch {
-      setResults([]);
-      setDegraded(false);
+      let acc = first.tracks;
+      setResults(acc);
+      setDegraded(first.degraded);
+
+      // Fill toward the target with additional paced passes, each excluding the
+      // artists already added and deduping what comes back. Stop early on a
+      // degraded pass, when nothing new arrives, or once the target is reached.
+      if (target > 20 && !first.degraded && acc.length > 0) {
+        const seen = new Set(acc.map(trackKey));
+        const maxPass = Math.ceil(target / 20) + 1;
+        for (let pass = 2; pass <= maxPass && acc.length < target; pass++) {
+          setFillProgress({ have: acc.length, target });
+          await sleep(PASS_GAP_MS);
+          const exclude = [
+            ...new Set(acc.map((t) => t.artists[0]?.name).filter((n): n is string => !!n)),
+          ];
+          const next = await runPass(exclude);
+          if (!next || next.degraded) break;
+          const fresh = next.tracks.filter((t) => {
+            const k = trackKey(t);
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+          if (fresh.length === 0) break;
+          acc = [...acc, ...fresh].slice(0, target);
+          setResults(acc);
+          setFillProgress({ have: acc.length, target });
+        }
+      }
     } finally {
       setIsLoading(false);
+      setFillProgress(null);
     }
-  }, [prompt, mode, filters, addRecentPrompt, currentDraftId, setGenerationContext]);
+  }, [prompt, mode, filters, length, addRecentPrompt, currentDraftId, setGenerationContext]);
 
   // Auto-generate if prompt came from URL
   useEffect(() => {
@@ -183,6 +236,35 @@ function GeneratorContent() {
                   : "Describe the vibe... 'Late night neon rainy city streets with lo-fi jazz beats'"
           }
         />
+
+        {/* Playlist length — longer targets fill across paced passes */}
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <span className="text-xs uppercase tracking-[0.15em] text-secondary font-semibold">
+            Length
+          </span>
+          <div className="inline-flex rounded-full bg-surface-container/60 border border-white/10 p-1">
+            {(["1h", "2h", "3h"] as const).map((L) => (
+              <button
+                key={L}
+                type="button"
+                onClick={() => setLength(L)}
+                disabled={isLoading || fillProgress !== null}
+                className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all disabled:opacity-50 ${
+                  length === L
+                    ? "bg-primary text-on-primary"
+                    : "text-on-surface-variant hover:text-primary"
+                }`}
+              >
+                {L === "1h" ? "~1 hr" : L === "2h" ? "~2 hrs" : "~3 hrs"}
+              </button>
+            ))}
+          </div>
+          {length !== "1h" && (
+            <span className="text-xs text-on-surface-variant/60">
+              builds in a few paced passes · uses more of the daily Spotify quota
+            </span>
+          )}
+        </div>
       </section>
 
       {/* Mobile filter toggle */}
@@ -234,6 +316,18 @@ function GeneratorContent() {
               <p className="text-sm text-on-surface-variant">
                 AI engine unavailable — showing basic search results. Try again in a
                 minute for curated recommendations.
+              </p>
+            </div>
+          )}
+          {fillProgress && (
+            <div className="mb-4 flex items-center gap-3 bg-surface-container/60 border border-primary/20 rounded-2xl px-5 py-3 animate-fade-in">
+              <Icon name="refresh" size="sm" className="text-primary shrink-0 animate-spin" />
+              <p className="text-sm text-on-surface-variant">
+                Building your playlist…{" "}
+                <span className="font-bold text-on-surface">
+                  {fillProgress.have}/{fillProgress.target}
+                </span>{" "}
+                tracks — pacing between passes to respect Spotify&apos;s rate limit.
               </p>
             </div>
           )}

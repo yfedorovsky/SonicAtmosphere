@@ -262,7 +262,7 @@ export async function generateRecommendations(
   // sequence: order the final list for listening flow. Callers that treat the
   // list prefix as "best N candidates" (living-playlist refresh, replace
   // weakest) must pass false to keep fit-ranked order.
-  options: { sequence?: boolean } = {}
+  options: { sequence?: boolean; excludeArtists?: string[] } = {}
 ): Promise<RecommendationResult> {
   // Generation-aware budget gate: if today's Spotify budget can't cover a whole
   // generation, fail cleanly NOW rather than starting one that dies mid-flight
@@ -279,7 +279,9 @@ export async function generateRecommendations(
   let result: RecommendationResult;
   switch (mode) {
     case "vibe":
-      result = await vibeRecommendations(accessToken, prompt, filters, tempoTarget);
+      result = await vibeRecommendations(
+        accessToken, prompt, filters, tempoTarget, options.excludeArtists ?? []
+      );
       break;
     case "song":
       result = await songRecommendations(accessToken, prompt, filters);
@@ -766,12 +768,22 @@ const NEIGHBORHOOD_TOOL: Anthropic.Tool = {
   },
 };
 
-async function askNeighborhood(content: string): Promise<Neighborhood | null> {
+async function askNeighborhood(
+  content: string,
+  excludeArtists: string[] = []
+): Promise<Neighborhood | null> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn("[recommendations] ANTHROPIC_API_KEY not set — LLM neighborhood unavailable");
     return null;
   }
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  // "Longer playlist" multi-pass fills: tell the model which artists are already
+  // in the playlist so each pass returns a FRESH neighborhood instead of the
+  // same top names (otherwise passes overlap heavily and never reach the target).
+  const avoid = [...new Set(excludeArtists.map((a) => a.trim()).filter(Boolean))].slice(0, 40);
+  const fullContent = avoid.length
+    ? `${content}\n\nDo NOT include these artists or their songs — they are ALREADY in the playlist. Choose a COMPLETELY DIFFERENT, equally fitting set: ${avoid.join(", ")}.`
+    : content;
   const strings = (v: unknown, max: number) =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, max) : [];
 
@@ -784,7 +796,7 @@ async function askNeighborhood(content: string): Promise<Neighborhood | null> {
         max_tokens: 6000,
         tools: [NEIGHBORHOOD_TOOL],
         tool_choice: { type: "tool", name: "emit_neighborhood" },
-        messages: [{ role: "user", content }],
+        messages: [{ role: "user", content: fullContent }],
       });
       if (response.stop_reason === "refusal") {
         console.error("[recommendations] neighborhood request refused by model");
@@ -987,7 +999,8 @@ async function vibeRecommendations(
   accessToken: string,
   prompt: string,
   filters: FilterValues,
-  tempoTarget: TempoTarget | null = null
+  tempoTarget: TempoTarget | null = null,
+  excludeArtists: string[] = []
 ): Promise<RecommendationResult> {
   // Native recommendations first — best quality where the app still has access
   const nativeTracks = await nativeVibeRecommendations(accessToken, prompt, filters);
@@ -1022,7 +1035,8 @@ Name real artists whose actual music delivers this vibe. Rules:
 - "avoid_tags": name the CONTRAST CLASS — the crowd tags/genres that a track fitting this vibe should NOT carry. Pick the adjacent-but-wrong styles that generic search will wrongly surface (e.g. for chaotic hard bop: "smooth jazz", "lounge", "easy listening", "chillout"; for driving techno: "ambient", "downtempo"). These become a hard veto against mislabeled filler, so choose confidently-wrong styles, not merely different ones.${tempoHint(tempoTarget)}
 
 Respond ONLY with valid JSON in this exact format, no other text:
-{"artists": ["...16 distinct artists spanning the neighborhood — enough to fill a 20-track playlist with no repeats..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."], "avoid_tags": ["...up to 6 contrast-class tags this vibe must NOT include..."]}`
+{"artists": ["...16 distinct artists spanning the neighborhood — enough to fill a 20-track playlist with no repeats..."], "genres": ["...3 short genre terms as used on Spotify..."], "keywords": ["...up to 2 short track-search phrases, only if genuinely useful..."], "tracks": ["...up to 6 specific songs as 'Title | Artist' that epitomize the requested mood and energy..."], "avoid_tags": ["...up to 6 contrast-class tags this vibe must NOT include..."]}`,
+    excludeArtists
   );
 
   if (neighborhood && (neighborhood.artists.length > 0 || neighborhood.genres.length > 0)) {
