@@ -2,6 +2,9 @@
 import {
   precisionAtK,
   scoreRun,
+  ndcgAtK,
+  rPrecision,
+  scoreRunBy,
   bootstrapMeanCI,
   pairedBootstrapDiff,
 } from "./eval-lib.mjs";
@@ -26,6 +29,25 @@ const run = { p1: ["t1", "t2"], p2: ["x", "y"] };
 const judg = { p1: J, p2: {} };
 const scores = scoreRun(run, judg, 2);
 assert(!("p2" in scores) && "p1" in scores, "scoreRun skips prompts with no judgments");
+
+// --- ndcgAtK (rank-aware) ---
+assert(approx(ndcgAtK(["t1", "t2", "t3", "t4"], J, 4), 1.0), "ideal order (best first) -> NDCG 1.0");
+const ndcgReversed = ndcgAtK(["t4", "t3", "t2", "t1"], J, 4);
+assert(ndcgReversed > 0 && ndcgReversed < 1.0, "worst-first order -> NDCG below 1 (rank matters)");
+assert(ndcgAtK(["t1", "t4"], J, 20) > ndcgAtK(["t4", "t1"], J, 20), "relevant-first beats irrelevant-first at same k");
+assert(approx(ndcgAtK(["z"], { z: "irrelevant" }, 20), 0), "no positive weight -> NDCG 0 (IDCG 0)");
+
+// --- rPrecision (precision at R = #relevant) ---
+assert(approx(rPrecision(["t1", "t2", "t3", "t4"], J), 1.0), "both relevant in top R=2 -> 1.0");
+assert(approx(rPrecision(["t1", "t4"], J), 0.5), "one relevant one irrelevant in top R=2 -> 0.5");
+assert(approx(rPrecision(["t3", "t4"], J), 0.25), "borderline + irrelevant in top R=2 -> 0.25");
+assert(approx(rPrecision([], J), 0), "empty run -> 0");
+assert(approx(rPrecision(["a", "b"], { a: "borderline" }), 0), "R=0 (no 'relevant' judged) -> 0");
+
+// --- scoreRunBy works for any metric and skips unjudged prompts ---
+const ndcgScores = scoreRunBy(run, judg, (t, j) => ndcgAtK(t, j, 2));
+assert(!("p2" in ndcgScores) && "p1" in ndcgScores, "scoreRunBy skips prompts with no judgments");
+assert(approx(ndcgScores.p1, ndcgAtK(["t1", "t2"], J, 2)), "scoreRunBy applies the given per-prompt metric");
 
 // --- bootstrapMeanCI ---
 const identical = { a: 0.6, b: 0.6, c: 0.6 };

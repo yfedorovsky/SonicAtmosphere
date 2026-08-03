@@ -43,11 +43,58 @@ export function precisionAtK(trackIds, judgmentsForPrompt, k = 20) {
  * Returns { promptId -> score } for prompts with judgments.
  */
 export function scoreRun(run, judgments, k = 20) {
+  return scoreRunBy(run, judgments, (trackIds, j) => precisionAtK(trackIds, j, k));
+}
+
+/**
+ * NDCG@k for one prompt, using the graded labels (relevant=1, borderline=0.5).
+ * DCG sums rel_i / log2(i+1) over the top k; IDCG is the DCG of the ideal
+ * ordering (every judged track for this prompt, sorted by weight, top k). Unlike
+ * P@k this is RANK-AWARE — it rewards putting the strongest tracks first, which
+ * matches how a listener judges a playlist from the top down. Returns 0 when no
+ * judged track has positive weight (IDCG 0). (RecSys-2018 APC metric family.)
+ */
+export function ndcgAtK(trackIds, judgmentsForPrompt, k = 20) {
+  const weight = (id) => LABEL_WEIGHT[judgmentsForPrompt?.[id]] ?? 0;
+  const dcg = trackIds
+    .slice(0, k)
+    .reduce((s, id, i) => s + weight(id) / Math.log2(i + 2), 0);
+  const idcg = Object.values(judgmentsForPrompt ?? {})
+    .map((label) => LABEL_WEIGHT[label] ?? 0)
+    .sort((a, b) => b - a)
+    .slice(0, k)
+    .reduce((s, w, i) => s + w / Math.log2(i + 2), 0);
+  return idcg > 0 ? dcg / idcg : 0;
+}
+
+/**
+ * R-precision for one prompt: precision at rank R, where R is the number of
+ * tracks judged 'relevant' for this prompt (partial credit for borderline in the
+ * numerator). Order-invariant within the top R and normalized for how many good
+ * answers actually exist, so it's comparable across prompts of different
+ * difficulty. Returns 0 when R is 0 (no known-relevant tracks to retrieve).
+ */
+export function rPrecision(trackIds, judgmentsForPrompt) {
+  const j = judgmentsForPrompt ?? {};
+  const R = Object.values(j).filter((label) => label === "relevant").length;
+  if (R === 0) return 0;
+  let sum = 0;
+  for (const id of trackIds.slice(0, R)) sum += LABEL_WEIGHT[j[id]] ?? 0;
+  return sum / R;
+}
+
+/**
+ * Per-prompt scores for any metric fn(trackIds, judgmentsForPrompt) -> number.
+ * Skips prompts with no judgments (same rule as scoreRun); the returned map
+ * feeds bootstrapMeanCI / pairedBootstrapDiff unchanged, so P@20, NDCG@20 and
+ * R-precision all gate through the identical prompt-resampled bootstrap.
+ */
+export function scoreRunBy(run, judgments, perPrompt) {
   const scores = {};
   for (const [promptId, trackIds] of Object.entries(run)) {
     const j = judgments[promptId];
     if (!j || Object.keys(j).length === 0) continue;
-    scores[promptId] = precisionAtK(trackIds, j, k);
+    scores[promptId] = perPrompt(trackIds, j);
   }
   return scores;
 }

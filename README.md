@@ -12,7 +12,7 @@ AI-assisted playlist curation. Describe a vibe, seed it with a song you love, or
   - **Lock track** — freeze keepers; locked tracks can't be removed and always survive replacements and refreshes.
   - **Replace weakest N** — swap the worst-fitting unlocked tracks for fresh suggestions, with modifiers (*less mainstream, more energy, calmer, more acoustic*). One undo step.
   - **Arrange for flow (DJ mode)** — reorder the whole playlist so adjacent tracks transition well: a minimum-transition-cost path over energy, tempo (half/double-time aware) and Camelot-wheel harmonic compatibility. Two shapes — *Smooth* (every hand-off seamless) and *Party arc* (mellow open → mid/late peak → cool-down). Works on any playlist (generated or imported), spends no Spotify quota (features come from ReccoBeats), and is one undo step. Pair it with Spotify's own Crossfade (Settings → Playback) for real fades.
-  - **Explain picks** — a short AI "why this track is here" note under each track.
+  - **Explain picks / Traits** — a short note under each track: either an AI "why this fits the vibe" line (*Explain picks*), or **Traits** — deterministic, LLM-free evidence of the track's measured audio character (*mellow · acoustic · danceable…*), computed from features with no Spotify quota. Traits is faithful-by-construction; the AI note is more evocative but post-hoc.
   - **Auto-title** — AI playlist titles and description.
 - **Living playlists** — per-draft refresh rules: daily/weekly cadence, keep-percent (e.g. keep 60%, rotate 40%), avoid-artist-repeats. Runs on a platform cron; manual **Refresh now** any time.
 - **Templates** — save a draft's recipe (prompt/mode/filters) and generate fresh drafts from it in one click.

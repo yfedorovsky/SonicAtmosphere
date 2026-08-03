@@ -497,9 +497,14 @@ async function annotateAndRank(
       TEXTURE_DIMS.reduce((s, dim, i) => s + DIM_WEIGHTS[dim] * (za[i] - zb[i]) ** 2, 0)
     );
 
-  // Reference set for texture k-NN: the resolved exemplars. If vibe intended
-  // exemplars but <2 resolved, fall back to the top-ranked tier-0 candidates
-  // (pseudo-exemplars) so texture ranking is never SILENTLY disabled.
+  // Reference set for texture k-NN: the resolved exemplars, and ONLY those. If
+  // vibe intended exemplars but <2 resolved, ABSTAIN — do not seed the reference
+  // from top pool candidates. Pseudo-exemplars are circular: they make the
+  // candidate pool validate itself, so a popularity-heavy pool "proves" that
+  // popularity-heavy tracks fit the mood. When we have no trustworthy anchor,
+  // skipping texture rerank and falling back to the deterministic fit order
+  // (tier + popularity-proximity from resolveAndRank) is more honest than
+  // reinforcing an arbitrary pool. (Adversarial review B/#4.)
   const exemplarFeatures = ctx.exemplarIds
     .map((id) => features.get(id))
     .filter((f): f is AudioFeatures => !!f);
@@ -509,11 +514,7 @@ async function annotateAndRank(
     refZ = exemplarFeatures.map(zvec);
     textureSource = "exemplars";
   } else if (ctx.exemplarIds.length > 0) {
-    const pseudo = poolFeatures.slice(0, 5);
-    if (pseudo.length >= 2) {
-      refZ = pseudo.map(zvec);
-      textureSource = "pseudo-exemplars";
-    }
+    textureSource = "abstain"; // <2 exemplars resolved — no reranking on a fabricated anchor
   }
   if (ctx.exemplarIds.length > 0) {
     console.log(

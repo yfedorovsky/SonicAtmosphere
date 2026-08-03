@@ -2,7 +2,12 @@
 
 A zero-traffic way to tell whether a pipeline change actually helped, instead of
 guessing from one noisy run. Built on pooled relevance judgments (Cranfield/TREC
-methodology), precision@20, and bootstrap confidence intervals.
+methodology), reported as **P@20 (the ship gate) plus NDCG@20 and R-precision**
+— the RecSys-2018 automatic-playlist-continuation metric family — each with a
+bootstrap confidence interval. P@20 is interpretable but rank-blind; NDCG@20 adds
+rank-awareness (best tracks up top); R-precision normalizes for how many good
+answers a prompt actually has. All three resample the same prompt set, so the
+paired-bootstrap gate is unchanged.
 
 ## Why
 
@@ -58,8 +63,10 @@ human effort; it compounds — every future change is scored against it.
 node scripts/eval-score.mjs http://localhost:3000
 ```
 
-Prints per-prompt P@20 and the aggregate mean with a 95% CI, and saves the run
-under `eval/runs/`.
+Prints per-prompt P@20 (worst-first triage list) plus the aggregate P@20,
+NDCG@20 and R-precision — each with a 95% CI — and saves all three under
+`eval/runs/`. `--compare` reports the paired-bootstrap delta for each metric and
+gates on P@20.
 
 **4. Gate a change.** Save a baseline run on `main`, make your change, save
 another run, then:

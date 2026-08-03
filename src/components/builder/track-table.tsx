@@ -23,6 +23,7 @@ export function TrackTable() {
   const { driftScores, outlierIds } = useVibeDrift(currentDraft.tracks);
   const lockedIds = new Set(currentDraft.lockedTrackIds ?? []);
   const [isExplaining, setIsExplaining] = useState(false);
+  const [isTraits, setIsTraits] = useState(false);
   const rationales = currentDraft.trackRationales ?? {};
   const unexplained = currentDraft.tracks.filter((t) => !rationales[t.id]);
 
@@ -58,6 +59,28 @@ export function TrackTable() {
     }
   }
 
+  // Deterministic alternative to "Explain picks": each track's measured audio
+  // character (no LLM, no Spotify quota). Faithful evidence, not a post-hoc note.
+  async function handleTraits() {
+    if (isTraits || unexplained.length === 0) return;
+    setIsTraits(true);
+    try {
+      const res = await fetch("/api/rationale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "traits", tracks: unexplained.map((t) => ({ id: t.id })) }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rationales) setTrackRationales(data.rationales);
+      }
+    } catch {
+      // Traits are an enhancement — fail quietly.
+    } finally {
+      setIsTraits(false);
+    }
+  }
+
   if (currentDraft.tracks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in">
@@ -82,6 +105,22 @@ export function TrackTable() {
       <div className="flex flex-wrap items-center justify-between gap-y-3 mb-4">
         <h2 className="font-headline text-2xl font-bold">Tracklist</h2>
         <div className="flex flex-wrap items-center gap-2">
+          {unexplained.length > 0 && (
+            <button
+              type="button"
+              onClick={handleTraits}
+              disabled={isTraits}
+              title="Show each track's measured audio traits (energy, acoustic, danceable…) — no AI, just the data"
+              className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold bg-surface-container/60 border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 transition-all disabled:opacity-50"
+            >
+              <Icon
+                name={isTraits ? "progress_activity" : "insights"}
+                size="sm"
+                className={isTraits ? "animate-spin" : undefined}
+              />
+              {isTraits ? "Reading..." : "Traits"}
+            </button>
+          )}
           {unexplained.length > 0 && (
             <button
               type="button"
