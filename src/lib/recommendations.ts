@@ -857,6 +857,8 @@ interface ResolveOptions {
   // How many named artists to search (default 12).
   artistLimit?: number;
   limit: number;
+  // Generator mode, used only to tag the neighborhood-resolution diagnostic log.
+  mode?: GeneratorMode;
 }
 
 async function resolveAndRank(
@@ -885,6 +887,21 @@ async function resolveAndRank(
     Promise.all(genreQueries.map((g) => searchTracks(`genre:"${g}"`, accessToken, 8))),
     Promise.all(keywordQueries.map((q) => searchTracks(q, accessToken, 8))),
   ]);
+
+  // Neighborhood-resolution gauge (adversarial-review B6): of the artists the LLM
+  // proposed, how many resolved to >=1 usable (primary-artist) track. A proposed
+  // artist that resolves to nothing is misspelled, absent from Spotify, or
+  // invented — logging the rate turns the LLM's hallucination/coverage failure
+  // into an observable per-generation number (grep `neighborhood resolution`).
+  if (artistQueries.length > 0) {
+    const unresolved = artistQueries.filter((_, i) => artistResults[i].length === 0);
+    const resolvedCount = artistQueries.length - unresolved.length;
+    console.log(
+      `[recommendations] neighborhood resolution${opts.mode ? ` mode=${opts.mode}` : ""}: ` +
+        `${resolvedCount}/${artistQueries.length} artists resolved` +
+        (unresolved.length ? ` — unresolved: ${unresolved.join(", ")}` : "")
+    );
+  }
 
   // Tiered ranking: named artists (and any pre-supplied catalog) are safer
   // bets than generic genre/keyword hits; within a tier, prefer popularity
@@ -1026,6 +1043,7 @@ Respond ONLY with valid JSON in this exact format, no other text:
     // Always over-fetch: the feature-based re-rank and the one-per-artist cap
     // both need a wider pool than the final 20 to select from.
     const tracks = await resolveAndRank(accessToken, neighborhood, {
+      mode: "vibe",
       tierZeroTracks: exemplars,
       anchorPopularity: filters.popularity,
       tierOneCap: 6,
@@ -1202,6 +1220,7 @@ Respond ONLY with valid JSON in this exact format, no other text:
   }
 
   const candidates = await resolveAndRank(accessToken, neighborhood, {
+    mode: "song",
     tierZeroTracks: artistTracks,
     anchorPopularity: seed.popularity,
     exclude: [seed],
@@ -1295,6 +1314,7 @@ Respond ONLY with valid JSON in this exact format, no other text:
   if (!neighborhood) return { tracks: ownTracks.slice(0, 21), degraded: true };
 
   const candidates = await resolveAndRank(accessToken, neighborhood, {
+    mode: "artist",
     tierZeroTracks: ownTracks,
     anchorPopularity: anchor,
     tierOneCap: 4,
@@ -1348,7 +1368,7 @@ Respond ONLY with valid JSON in this exact format, no other text:
   const resolved = await resolveAndRank(
     accessToken,
     neighborhood ?? { artists: [], genres, keywords: [] },
-    { anchorPopularity: filters.popularity, tierOneCap: 6, limit: 20 }
+    { mode: "genre", anchorPopularity: filters.popularity, tierOneCap: 6, limit: 20 }
   );
   // Without the LLM's artists, genre:"..." field search alone surfaces
   // obscure text matches — still degraded even when it returns tracks.
