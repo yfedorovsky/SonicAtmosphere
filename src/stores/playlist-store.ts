@@ -53,6 +53,7 @@ interface PlaylistActions {
   removeTrack: (trackId: string) => void;
   reorderTracks: (startIndex: number, endIndex: number) => void;
   setTrackOrder: (orderedIds: string[]) => void;
+  setTracks: (tracks: SpotifyTrack[]) => void;
   clearTracks: () => void;
   totalDuration: () => string;
   trackCount: () => number;
@@ -237,6 +238,30 @@ export const usePlaylistStore = create<PlaylistStore>()(
           }
           return {
             currentDraft: { ...state.currentDraft, tracks, updatedAt: new Date().toISOString() },
+          };
+        });
+      },
+
+      // Replace the whole tracklist in one set() — e.g. applying a previewed
+      // living-playlist refresh — so it's a SINGLE undo step (unlike the old
+      // reload-and-wipe-history flow). Locks and rationales for tracks that
+      // didn't survive the change are pruned.
+      setTracks: (tracks) => {
+        set((state) => {
+          const ids = new Set(tracks.map((t) => t.id));
+          const rationales = state.currentDraft.trackRationales
+            ? Object.fromEntries(
+                Object.entries(state.currentDraft.trackRationales).filter(([id]) => ids.has(id)),
+              )
+            : state.currentDraft.trackRationales;
+          return {
+            currentDraft: {
+              ...state.currentDraft,
+              tracks,
+              lockedTrackIds: state.currentDraft.lockedTrackIds?.filter((id) => ids.has(id)),
+              trackRationales: rationales,
+              updatedAt: new Date().toISOString(),
+            },
           };
         });
       },

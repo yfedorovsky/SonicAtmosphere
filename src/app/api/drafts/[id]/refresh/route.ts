@@ -41,11 +41,24 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/drafts/[id]
             artistRepeatWindow: null,
           };
 
-    const result = await runRefresh(db, spec);
+    // ?preview=1 computes the change-set without mutating the draft, so the
+    // client can show it for review before the user applies it.
+    const preview = req.nextUrl.searchParams.get("preview") === "1";
+    const result = await runRefresh(db, spec, { apply: !preview });
     if (!result.ok) {
       return NextResponse.json({ error: result.reason ?? "Refresh failed" }, { status: 422 });
     }
-    return NextResponse.json({ ok: true, replaced: result.replaced });
+    return NextResponse.json(
+      preview
+        ? {
+            ok: true,
+            replaced: result.replaced,
+            proposedTracks: result.proposedTracks,
+            removedIds: result.removedIds,
+            addedIds: result.addedIds,
+          }
+        : { ok: true, replaced: result.replaced },
+    );
   } catch (error) {
     if (error instanceof DraftAccessError) {
       return NextResponse.json({ error: "Draft not found" }, { status: 404 });

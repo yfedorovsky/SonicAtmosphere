@@ -26,6 +26,11 @@ export interface RefreshResult {
   ok: boolean;
   replaced: number;
   reason?: string;
+  // Populated only in preview mode (opts.apply === false): the proposed new
+  // tracklist and what changed, for the client to review before applying.
+  proposedTracks?: SpotifyTrack[];
+  removedIds?: string[];
+  addedIds?: string[];
 }
 
 export function nextRunTime(cadence: "daily" | "weekly", from = new Date()): Date {
@@ -36,7 +41,11 @@ export function nextRunTime(cadence: "daily" | "weekly", from = new Date()): Dat
 // The living-playlist core: keep the best-fitting keepPercent (locked tracks
 // always survive), rotate the rest with fresh suggestions from the draft's
 // own generation context.
-export async function runRefresh(db: Db, spec: RefreshSpec): Promise<RefreshResult> {
+export async function runRefresh(
+  db: Db,
+  spec: RefreshSpec,
+  opts: { apply?: boolean } = {},
+): Promise<RefreshResult> {
   const draft = await getDraftById(db, spec.userId, spec.draftId);
   if (!draft || draft.tracks.length === 0) {
     return { ok: false, replaced: 0, reason: "Draft is empty or missing" };
@@ -123,6 +132,19 @@ export async function runRefresh(db: Db, spec: RefreshSpec): Promise<RefreshResu
   }
   if (replaced === 0) {
     return { ok: false, replaced: 0, reason: "No fresh suggestions found" };
+  }
+
+  const newIdSet = new Set(newTracks.map((t) => t.id));
+  const oldIdSet = new Set(draft.tracks.map((t) => t.id));
+  const removedIds = draft.tracks.filter((t) => !newIdSet.has(t.id)).map((t) => t.id);
+  const addedIds = newTracks.filter((t) => !oldIdSet.has(t.id)).map((t) => t.id);
+
+  // Preview mode: return the proposed change-set WITHOUT mutating the draft or
+  // advancing the rule. The client shows it for review and applies it as a
+  // single undo step, turning a silent overwrite into an explicit, reversible
+  // choice (adversarial review C).
+  if (opts.apply === false) {
+    return { ok: true, replaced, proposedTracks: newTracks, removedIds, addedIds };
   }
 
   // Prune rationales only for tracks that actually left the playlist — tracks

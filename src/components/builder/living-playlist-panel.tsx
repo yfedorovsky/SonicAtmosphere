@@ -2,23 +2,28 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/ui/icon";
-import { useDraftsStore } from "@/stores/drafts-store";
 import { usePlaylistStore } from "@/stores/playlist-store";
 import { cn } from "@/lib/utils";
+import type { SpotifyTrack } from "@/types";
 
 type Cadence = "off" | "daily" | "weekly";
 
 // Sprint 3 retention controls: auto-refresh rules ("keep 60%, rotate the
 // rest"), manual refresh, and saving the draft's recipe as a template.
 export function LivingPlaylistPanel() {
-  const { currentDraft, loadDraft } = usePlaylistStore();
-  const { fetchDraft } = useDraftsStore();
+  const { currentDraft, setTracks } = usePlaylistStore();
   const [open, setOpen] = useState(false);
   const [cadence, setCadence] = useState<Cadence>("off");
   const [keepPercent, setKeepPercent] = useState(60);
   const [varyArtists, setVaryArtists] = useState(false);
   const [ruleLoaded, setRuleLoaded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [preview, setPreview] = useState<{
+    proposedTracks: SpotifyTrack[];
+    removedIds: string[];
+    addedIds: string[];
+    replaced: number;
+  } | null>(null);
   const [templateState, setTemplateState] = useState<"idle" | "saving" | "saved">("idle");
   const [message, setMessage] = useState<string | null>(null);
 
@@ -82,12 +87,15 @@ export function LivingPlaylistPanel() {
     void persistRule(next);
   }
 
-  async function handleRefreshNow() {
+  // "Refresh now" is a PREVIEW: compute the change-set server-side without
+  // mutating, and show it for review. Nothing changes until the user applies.
+  async function handlePreviewRefresh() {
     if (isRefreshing) return;
     setIsRefreshing(true);
     setMessage(null);
+    setPreview(null);
     try {
-      const res = await fetch(`/api/drafts/${encodeURIComponent(draftId)}/refresh`, {
+      const res = await fetch(`/api/drafts/${encodeURIComponent(draftId)}/refresh?preview=1`, {
         method: "POST",
       });
       const data = await res.json().catch(() => null);
@@ -95,18 +103,32 @@ export function LivingPlaylistPanel() {
         setMessage(data?.error ?? "Refresh failed. Try again.");
         return;
       }
-      // Pull the refreshed draft back into the working copy.
-      const fresh = await fetchDraft(draftId);
-      if (fresh) {
-        loadDraft(fresh);
-        usePlaylistStore.temporal.getState().clear();
+      if (Array.isArray(data?.proposedTracks) && data.replaced > 0) {
+        setPreview({
+          proposedTracks: data.proposedTracks,
+          removedIds: data.removedIds ?? [],
+          addedIds: data.addedIds ?? [],
+          replaced: data.replaced,
+        });
+      } else {
+        setMessage("Nothing to rotate right now.");
       }
-      setMessage(`Rotated ${data.replaced} ${data.replaced === 1 ? "track" : "tracks"}.`);
     } catch {
       setMessage("Refresh failed. Try again.");
     } finally {
       setIsRefreshing(false);
     }
+  }
+
+  // Apply the proposed change-set as a single undo step — revertible, unlike
+  // the old reload-and-wipe-history flow.
+  function handleApplyPreview() {
+    if (!preview) return;
+    setTracks(preview.proposedTracks);
+    setMessage(
+      `Rotated ${preview.replaced} ${preview.replaced === 1 ? "track" : "tracks"} — undo to revert.`,
+    );
+    setPreview(null);
   }
 
   async function handleSaveTemplate() {
@@ -226,31 +248,70 @@ export function LivingPlaylistPanel() {
 
           {message && <p className="text-xs text-on-surface-variant">{message}</p>}
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleRefreshNow}
-              disabled={isRefreshing}
-              className="flex-1 py-2.5 bg-secondary/90 text-on-primary rounded-full text-sm font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              <Icon
-                name={isRefreshing ? "progress_activity" : "refresh"}
-                size="sm"
-                className={isRefreshing ? "animate-spin" : undefined}
-              />
-              {isRefreshing ? "Refreshing..." : "Refresh now"}
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveTemplate}
-              disabled={templateState !== "idle"}
-              title="Save this draft's prompt, mode, and filters as a reusable template"
-              className="flex-1 py-2.5 bg-surface-container-high/60 text-on-surface rounded-full text-sm font-bold flex items-center justify-center gap-2 hover:bg-surface-container-high transition-colors disabled:opacity-70"
-            >
-              <Icon name={templateState === "saved" ? "check" : "bookmark_add"} size="sm" />
-              {templateState === "saved" ? "Saved" : templateState === "saving" ? "Saving..." : "Template"}
-            </button>
-          </div>
+          {preview ? (
+            <div className="space-y-2 rounded-xl border border-secondary/30 bg-secondary/5 p-3">
+              <p className="text-sm font-bold text-secondary flex items-center gap-1.5">
+                <Icon name="swap_horiz" size="sm" />
+                {preview.addedIds.length} in · {preview.removedIds.length} out
+              </p>
+              {preview.addedIds.length > 0 && (
+                <p className="text-xs text-on-surface-variant/80 leading-relaxed">
+                  Adding:{" "}
+                  {preview.proposedTracks
+                    .filter((t) => preview.addedIds.includes(t.id))
+                    .slice(0, 4)
+                    .map((t) => t.name)
+                    .join(", ")}
+                  {preview.addedIds.length > 4 ? "…" : ""}
+                </p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleApplyPreview}
+                  className="flex-1 py-2 bg-secondary text-on-primary rounded-full text-sm font-bold hover:opacity-90 transition-opacity"
+                >
+                  Apply
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreview(null)}
+                  className="flex-1 py-2 bg-surface-container-high/60 text-on-surface rounded-full text-sm font-bold hover:bg-surface-container-high transition-colors"
+                >
+                  Discard
+                </button>
+              </div>
+              <p className="text-[11px] text-on-surface-variant/50">
+                Nothing changes until you Apply — and Apply is one undo step.
+              </p>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handlePreviewRefresh}
+                disabled={isRefreshing}
+                className="flex-1 py-2.5 bg-secondary/90 text-on-primary rounded-full text-sm font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                <Icon
+                  name={isRefreshing ? "progress_activity" : "refresh"}
+                  size="sm"
+                  className={isRefreshing ? "animate-spin" : undefined}
+                />
+                {isRefreshing ? "Checking..." : "Preview refresh"}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTemplate}
+                disabled={templateState !== "idle"}
+                title="Save this draft's prompt, mode, and filters as a reusable template"
+                className="flex-1 py-2.5 bg-surface-container-high/60 text-on-surface rounded-full text-sm font-bold flex items-center justify-center gap-2 hover:bg-surface-container-high transition-colors disabled:opacity-70"
+              >
+                <Icon name={templateState === "saved" ? "check" : "bookmark_add"} size="sm" />
+                {templateState === "saved" ? "Saved" : templateState === "saving" ? "Saving..." : "Template"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
