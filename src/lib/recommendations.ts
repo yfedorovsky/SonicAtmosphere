@@ -14,6 +14,7 @@ import type { AudioFeatures } from "./spotify";
 import { fetchAudioFeatures, resolveTempo } from "@/lib/audio-features";
 import { getArtistTags, tagsHitVeto } from "@/lib/lastfm";
 import { budgetAllowsGeneration } from "@/lib/budget";
+import { camelotPenalty, mixTempo } from "@/lib/sequencing";
 
 // A generation fans out to ~25–40 Spotify search calls. Check the daily budget
 // can cover a whole one BEFORE starting so we fail cleanly up front instead of
@@ -577,30 +578,9 @@ async function annotateAndRank(
 // compatibility. Applied when no tempo target dictates a cadence-first order.
 // ---------------------------------------------------------------------------
 
-// Camelot wheel numbers indexed by Spotify pitch class (0=C..11=B).
-const CAMELOT_MAJOR = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
-const CAMELOT_MINOR = [5, 12, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10];
-
-function camelotPenalty(a: AudioFeatures | undefined, b: AudioFeatures | undefined): number {
-  if (!a || !b || a.key < 0 || b.key < 0) return 0.4; // unknown key: mild penalty
-  const numA = (a.mode === 1 ? CAMELOT_MAJOR : CAMELOT_MINOR)[a.key];
-  const numB = (b.mode === 1 ? CAMELOT_MAJOR : CAMELOT_MINOR)[b.key];
-  if (numA === numB) return a.mode === b.mode ? 0 : 0.15; // perfect / mood swap
-  const step = Math.min(Math.abs(numA - numB), 12 - Math.abs(numA - numB));
-  if (step === 1 && a.mode === b.mode) return 0.2; // energy shift ±1
-  return 1;
-}
-
-// Normalize BPM into a comparable "mix tempo" band (half/double-time fold).
-// Non-positive tempo (failed beat detection) must return null — feeding 0
-// into the fold loop would spin forever.
-function mixTempo(bpm: number | undefined): number | null {
-  if (bpm == null || bpm <= 0 || !Number.isFinite(bpm)) return null;
-  let t = bpm;
-  while (t >= 140) t /= 2;
-  while (t < 70) t *= 2;
-  return t;
-}
+// Camelot harmonic penalty + half/double-time tempo fold live in @/lib/sequencing
+// (shared with the Builder's on-demand "Arrange for flow"). camelotPenalty reads
+// {key, mode}; AudioFeatures satisfies that shape.
 
 function transitionCost(
   a: SpotifyTrack,

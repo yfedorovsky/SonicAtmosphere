@@ -52,6 +52,7 @@ interface PlaylistActions {
   addTrack: (track: SpotifyTrack) => boolean;
   removeTrack: (trackId: string) => void;
   reorderTracks: (startIndex: number, endIndex: number) => void;
+  setTrackOrder: (orderedIds: string[]) => void;
   clearTracks: () => void;
   totalDuration: () => string;
   trackCount: () => number;
@@ -210,6 +211,30 @@ export const usePlaylistStore = create<PlaylistStore>()(
           const tracks = [...state.currentDraft.tracks];
           const [removed] = tracks.splice(startIndex, 1);
           tracks.splice(endIndex, 0, removed);
+          return {
+            currentDraft: { ...state.currentDraft, tracks, updatedAt: new Date().toISOString() },
+          };
+        });
+      },
+
+      // Reorder the whole tracklist to match orderedIds (from "Arrange for
+      // flow"). Any track missing from orderedIds is appended in its current
+      // relative order so nothing is ever dropped. One set() = one undo step.
+      setTrackOrder: (orderedIds) => {
+        set((state) => {
+          const byId = new Map(state.currentDraft.tracks.map((t) => [t.id, t]));
+          const seen = new Set<string>();
+          const tracks: SpotifyTrack[] = [];
+          for (const id of orderedIds) {
+            const t = byId.get(id);
+            if (t && !seen.has(id)) {
+              tracks.push(t);
+              seen.add(id);
+            }
+          }
+          for (const t of state.currentDraft.tracks) {
+            if (!seen.has(t.id)) tracks.push(t);
+          }
           return {
             currentDraft: { ...state.currentDraft, tracks, updatedAt: new Date().toISOString() },
           };

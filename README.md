@@ -11,6 +11,7 @@ AI-assisted playlist curation. Describe a vibe, seed it with a song you love, or
 - **Builder (the editing loop)** — drag-to-reorder, undo/redo, 30-second previews, and:
   - **Lock track** — freeze keepers; locked tracks can't be removed and always survive replacements and refreshes.
   - **Replace weakest N** — swap the worst-fitting unlocked tracks for fresh suggestions, with modifiers (*less mainstream, more energy, calmer, more acoustic*). One undo step.
+  - **Arrange for flow (DJ mode)** — reorder the whole playlist so adjacent tracks transition well: a minimum-transition-cost path over energy, tempo (half/double-time aware) and Camelot-wheel harmonic compatibility. Two shapes — *Smooth* (every hand-off seamless) and *Party arc* (mellow open → mid/late peak → cool-down). Works on any playlist (generated or imported), spends no Spotify quota (features come from ReccoBeats), and is one undo step. Pair it with Spotify's own Crossfade (Settings → Playback) for real fades.
   - **Explain picks** — a short AI "why this track is here" note under each track.
   - **Auto-title** — AI playlist titles and description.
 - **Living playlists** — per-draft refresh rules: daily/weekly cadence, keep-percent (e.g. keep 60%, rotate 40%), avoid-artist-repeats. Runs on a platform cron; manual **Refresh now** any time.
@@ -72,6 +73,7 @@ All routes are session-scoped (signed anonymous cookie) and rate-limited. See [`
 | `POST /api/drafts/[id]/refresh` | Manual refresh now |
 | `GET/POST /api/templates`, `GET/DELETE /api/templates/[id]` | Saved generation recipes |
 | `GET /api/spotify/search` | Generation endpoint (all modes) + import matching |
+| `POST /api/sequence` | "Arrange for flow" — reorder a playlist for smooth/arc transitions (no Spotify calls) |
 | `POST /api/spotify/playlist` | Export to Spotify |
 | `POST /api/generate-meta` | AI titles + description |
 | `POST /api/rationale` | AI per-track "why this track is here" |

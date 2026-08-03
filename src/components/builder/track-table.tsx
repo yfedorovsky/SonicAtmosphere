@@ -10,6 +10,7 @@ import {
 import { TrackRow } from "./track-row";
 import { AddTrackButton } from "./add-track-button";
 import { ReplaceWeakestPanel } from "./replace-weakest-panel";
+import { ArrangeFlowPanel } from "./arrange-flow-panel";
 import { LivingPlaylistPanel } from "./living-playlist-panel";
 import { usePlaylistStore, useTemporalStore } from "@/stores/playlist-store";
 import { useVibeDrift } from "@/hooks/use-vibe-drift";
@@ -97,6 +98,7 @@ export function TrackTable() {
               {isExplaining ? "Explaining..." : "Explain picks"}
             </button>
           )}
+          <ArrangeFlowPanel />
           <ReplaceWeakestPanel driftScores={driftScores} />
           <LivingPlaylistPanel />
           <button
