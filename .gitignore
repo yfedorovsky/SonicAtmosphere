@@ -43,6 +43,9 @@ ui_code.html
 # local embedded Postgres (PGlite) data
 /.pglite/
 
+# Discogs label-roster cache (regenerable; see lib/discogs.ts)
+/.discogs-cache/
+
 # eval generated artifacts (regenerable; labeled eval/judgments.json IS committed)
 /eval/label.html
 /eval/judgments.template.json
