@@ -76,6 +76,25 @@ wrong result.
    vs her later credit `Cláudya`; `Antônio Carlos Jobim` vs `Tom Jobim`). When a
   resolve fails or a "new" name looks canonical, check for a suffix-stripped or
   alias form before trusting either verdict.
+- **Pseudonyms are invisible to any name-based exclusion.** "Jay Richford &
+  Gary Stevan" are Stefano Torossi & Sandro Brugnolini — both already held.
+  Only domain knowledge catches these; treat library-music credits as suspect.
+- **Attribution transplants** are the worst LLM failure class: a real song
+  paired with a real artist who never recorded it (a Savina Yannatou "Yialo
+  Yialo" that does not exist — aggravated because the real song's title,
+  "Εις τον αφρό της θάλασσας", differs from its famous chorus). Verify the
+  PAIRING, not just that both names exist. Related: phantom titles synthesized
+  from linguistic patterns (an invented Turkish track name on a real album).
+- **Normalizer edge cases that broke real matches:** Turkish dotless ı (does
+  NOT NFKD-fold to i), Azerbaijani ə, katakana-only titles credited to
+  individual members (Seaside Lovers' メルティング・ブルー under Akira Inoue),
+  and ensemble names mistaken for album titles (Primavera en Salonico is
+  Yannatou's band). Always retry searches with a latinized/native-script
+  variant before declaring absence.
+- **Raw-vs-folded tempo is a rhetorical weapon.** Beat detectors double-time
+  ~1/3 of tracks; an argument quoting one track raw ("152 BPM — too fast!")
+  and another folded is cherry-picking. Always fold (halve >150) before
+  comparing, and ask which form any cited BPM is in.
 - **An LLM curator will invent a rationale for a wrong result** — it read the
   colliding label name and wrote "downtempo lounge, cool poise" about a rap
   track. Never treat the curator's confidence as verification.
@@ -117,6 +136,16 @@ Consequences:
   read the playlist back to check. A push script that runs twice silently
   double-appends the whole batch (happened twice on this project). Write a
   `pushed-<batch>.flag` after success and refuse to run while it exists.
+- **Playlist creation: `POST /me/playlists` works; `POST /users/{id}/playlists`
+  403s.** Same resource, different door.
+- **Author push scripts only via direct file writes.** Deriving one through a
+  PowerShell 5.1 text pipeline reads UTF-8 as ANSI and mojibakes emoji playlist
+  names into unmatchable strings — the append then silently skips those
+  playlists (happened twice despite an explicit UTF-8 write the second time:
+  the READ was already corrupted).
+- **Cue-album trap:** the "pick a representative track" fallback needs a higher
+  duration floor on film scores/OSTs — a 95s floor admits 1:47 cues that read
+  as tracks. Prefer the longest substantial cut on soundtrack albums.
 - **Removals and reordering must be manual**, or via a third-party tool the user
   authorizes themselves.
 - Quotas: a rolling burst limit plus an undisclosed daily cap. Pace ~1.1s
@@ -163,6 +192,37 @@ songful records. The AOTY Secondaries and RYM all-time charts are the corrective
 axis — they surfaced Sade, Jobim, Elis & Tom, Buena Vista, Piazzolla, Baden
 Powell, Lole y Manuel as *genuinely absent* from a 1,000-key known-set built
 from every prior pass. Check the canon explicitly before assuming it's covered.
+
+## LLM research accuracy (measured on this project)
+
+First-pass verification rates for "suggest N gems" research: **ChatGPT Deep
+Research 90%** (27/30; its self-assigned confidence daggers were honestly
+calibrated), **Gemini deep-research 76%** (38/50 R1), **Grok ~65%**. Failure
+signatures differ by model: Gemini title-morphs (near-miss titles on real
+albums) and attribution-transplants; Grok invents track placements; all three
+sycophantically "validate" claims fed back to them — a follow-up "validation
+report" that re-confirmed an already-debunked attribution and asserted six
+rescues ran **50% false**. Rules: feed error examples back in round-2 prompts
+(it measurably sharpens output), never accept a validation report without
+re-verifying, and treat streaming-absence as its own class (France Gall's and
+Stella's 60s French catalogs are real but unstreamed — absence ≠ hallucination).
+
+## The Source Atlas (ChatGPT DR, 2026-08-06)
+
+A 47-source mineable atlas — radio tracklist archives, Bandcamp columns,
+regional press in 7 languages, reissue houses, record-store curation, curator
+networks, festival predictors — lives in Downloads/deep-research-report (3).md
+with per-source mine-methods, cadences, and RSS/poll endpoints. Top sustained
+yield for this register: Bandcamp Daily *Best Latin*, dublab *Open Heart
+Social Club*, NTS Zoya, Rush Hour, SceneNoise, MIMS *Balance*, Test Pressing,
+KCRW Raul Campos, WOMEX, Hear65. Sweep coverage so far ≈60%: the video
+(Aloha Got Soul), festival (WOMEX/Babel), curator-interview (Dust & Grooves,
+Amoeba), Lot Radio, FIP, and Late Night Tales veins are UNMINED. Spotify
+playlist brands (Air France, Soho House) are unmineable on this API tier —
+eyeball-in-app only. Mining lesson: workflow fan-outs >4 concurrent agents
+correlated with host-app crashes; the journal makes crashes lossless
+(salvage `journal.jsonl`), but sequential one-source-at-a-time WebFetch with
+disk saves between sources is the crash-proof mode.
 
 ## Sequencing
 
