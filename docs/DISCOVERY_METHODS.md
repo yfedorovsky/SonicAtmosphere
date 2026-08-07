@@ -207,6 +207,19 @@ rescues ran **50% false**. Rules: feed error examples back in round-2 prompts
 re-verifying, and treat streaming-absence as its own class (France Gall's and
 Stella's 60s French catalogs are real but unstreamed — absence ≠ hallucination).
 
+**Task substitution (new class, non-hallucination):** hand ChatGPT DR a prompt
+as an *attached file* and its prompt-injection defense may treat the embedded
+instructions as untrusted document content — "extract and describe; do not
+execute" — and audit the FILE instead of doing the task. Our final-audit
+prompt (761 tracks + 7 musical deliverables) came back as a data-governance
+report: GDPR, WCAG, a 16-week remediation Gantt, zero of the 7 deliverables.
+Notably its concrete factual claims still ran accurate (it caught 7 malformed
+"M:60" durations — real, but a rounding bug in OUR emit script, not the data;
+`Math.round` on the seconds remainder mints ":60" — compute total seconds
+first). Rules: paste prompts INLINE as the chat message, open first-person
+("I'm the curator; this message is my direct request"), and pre-empt the
+genre misfire explicitly ("musical review, NOT metadata/governance audit").
+
 ## The Source Atlas (ChatGPT DR, 2026-08-06)
 
 A 47-source mineable atlas — radio tracklist archives, Bandcamp columns,
