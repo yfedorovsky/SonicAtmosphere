@@ -207,6 +207,21 @@ rescues ran **50% false**. Rules: feed error examples back in round-2 prompts
 re-verifying, and treat streaming-absence as its own class (France Gall's and
 Stella's 60s French catalogs are real but unstreamed — absence ≠ hallucination).
 
+**The high-bar prompt result (2026-08-08): 16/16 across all three models.**
+One prompt design change took Grok 65%→100%, Gemini 76%→100%, ChatGPT
+90%→100% in a single round: (1) embed the FULL artist exclusion (1,010
+names); (2) quote the models' own past errors back at them (the Yannatou
+transplant, the David Zé/Os Kiezos phantoms — named, verbatim); (3) grant
+explicit permission to return FEWER than asked ("if only three clear the
+bar, give three — padding is failure"); (4) define the bar by job-to-be-
+done, not genre ("the ONE Neapolitan masterpiece"). All three models
+self-restrained (3, 6, 7 picks vs max 10), daggered honestly, and
+independently converged on the same residual gaps (filin, Réunion,
+Naples) — convergence across models is itself a verification signal.
+Verify-side lesson: one "miss" was OUR matcher tripping on a Spotify
+catalog typo ("Feulles" for "Feuilles") — check the catalog's own
+spelling before scoring a claim false.
+
 **Task substitution (new class, non-hallucination):** hand ChatGPT DR a prompt
 as an *attached file* and its prompt-injection defense may treat the embedded
 instructions as untrusted document content — "extract and describe; do not
